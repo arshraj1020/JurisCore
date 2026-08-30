@@ -1,0 +1,181 @@
+# =============================================================================
+# JurisCore — base configuration
+#
+# Everything environment-specific arrives as an environment variable with a
+# local-friendly default. Nothing secret is committed: in deployed environments
+# the values below come from AWS Secrets Manager via the task definition.
+# =============================================================================
+
+spring:
+  application:
+    name: juriscore
+  profiles:
+    default: local
+
+  datasource:
+    url: ${JURISCORE_DB_URL:jdbc:postgresql://localhost:5432/juriscore}
+    username: ${JURISCORE_DB_USER:juriscore}
+    password: ${JURISCORE_DB_PASSWORD:juriscore}
+    hikari:
+      pool-name: juriscore-pool
+      maximum-pool-size: ${JURISCORE_DB_POOL_SIZE:20}
+      minimum-idle: 5
+      connection-timeout: 10000
+      # Below RDS/pgbouncer idle timeouts so the pool never hands out a dead socket.
+      max-lifetime: 1200000
+      idle-timeout: 300000
+
+  jpa:
+    # Off deliberately: a lazy association resolved during view rendering is a
+    # transaction held open for the length of the response. Load what you need
+    # inside the service, in its transaction.
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema. Hibernate only checks that the mapping agrees with it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+          batch_size: 32
+        order_inserts: true
+        order_updates: true
+        default_batch_fetch_size: 32
+        query:
+          fail_on_pagination_over_collection_fetch: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    schemas: organization,identity
+    default-schema: public
+    validate-on-migrate: true
+    # Never on: an out-of-order migration in production hides a real drift problem.
+    out-of-order: false
+
+  data:
+    redis:
+      host: ${JURISCORE_REDIS_HOST:localhost}
+      port: ${JURISCORE_REDIS_PORT:6379}
+      timeout: 2s
+      connect-timeout: 2s
+
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+      fail-on-empty-beans: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  # Trust X-Forwarded-* from the load balancer so redirects and client IPs are right.
+  forward-headers-strategy: framework
+  compression:
+    enabled: true
+    mime-types: application/json
+  error:
+    # The error envelope is produced by GlobalExceptionHandler; Boot's default
+    # error body must never leak a message or stack trace of its own.
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Deliberately short. env, configprops, beans, heapdump and threaddump are the
+        # endpoints that leak configuration — the JWT secret and database password among
+        # it — so they are never exposed, not even to an authenticated caller. Spring
+        # Security additionally gates everything except health and info behind
+        # SUPER_ADMIN, so this list is the inner of two locks.
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      # Anonymous callers get a bare UP/DOWN. Local and docker profiles widen this so a
+      # developer can see which dependency is unhappy; prod narrows it to nothing.
+      show-details: when-authorized
+      group:
+        # Liveness answers "is the JVM wedged" — restarting it is the only remedy, so a
+        # database outage must not appear here or the platform restart-loops through it.
+        liveness:
+          include: livenessState
+        # Readiness answers "should traffic come here". The database is required to serve
+        # any request, so it belongs. Redis deliberately does not: the only thing using it
+        # is the rate limiter, which fails open by design, so a Redis blip degrades abuse
+        # protection rather than removing the instance from the load balancer.
+        readiness:
+          include: readinessState,db
+  health:
+    # Both remain visible on /actuator/health itself, which is what makes that endpoint a
+    # usable dependency check even though Redis is excluded from the readiness probe.
+    db:
+      enabled: true
+    redis:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+
+juriscore:
+  api:
+    public-url: ${JURISCORE_PUBLIC_URL:http://localhost:8080}
+
+  security:
+    jwt:
+      # No default. The application must refuse to start rather than sign tokens
+      # with a value someone copied from a tutorial.
+      secret: ${JURISCORE_JWT_SECRET:}
+      issuer: juriscore
+      access-token-ttl: 15m
+      refresh-token-ttl: 14d
+      password-reset-ttl: 30m
+      allowed-clock-skew-seconds: 30
+    auth:
+      max-failed-attempts: 8
+      lock-duration: 15m
+    cors:
+      allowed-origins: ${JURISCORE_CORS_ORIGINS:http://localhost:3000}
+
+  rate-limit:
+    enabled: true
+    api-requests-per-window: 100
+    auth-requests-per-window: 10
+    window: 1m
+
+  aws:
+    enabled: ${JURISCORE_AWS_ENABLED:true}
+    region: ${AWS_REGION:ap-south-1}
+    # Empty means real AWS. Point it at LocalStack for local work.
+    endpoint: ${JURISCORE_AWS_ENDPOINT:}
+    access-key: ${AWS_ACCESS_KEY_ID:test}
+    secret-key: ${AWS_SECRET_ACCESS_KEY:test}
+    document-bucket: ${JURISCORE_S3_BUCKET:juriscore-documents}
+    notification-queue: ${JURISCORE_SQS_NOTIFICATIONS:juriscore-notifications}
+    audit-queue: ${JURISCORE_SQS_AUDIT:juriscore-audit}
+
+logging:
+  pattern:
+    # requestId / userId / organizationId come from the MDC; see RequestIdFilter.
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{requestId:-}] [%X{userId:-}] %logger{36} - %msg%n"
+  level:
+    root: INFO
+    com.juriscore: INFO

@@ -1,0 +1,23 @@
+# Deployed environments. Every value here must come from the task definition or
+# Secrets Manager — this file holds no secrets and no host names.
+
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: false
+
+juriscore:
+  aws:
+    # Empty: use the real AWS endpoints and the ECS task role's credentials.
+    endpoint: ""
+
+management:
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: WARN
+    com.juriscore: INFO

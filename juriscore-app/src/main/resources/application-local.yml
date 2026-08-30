@@ -1,0 +1,34 @@
+# Local development: app on the host, infrastructure in Docker Compose.
+#   docker compose up -d postgres redis localstack
+#   ./mvnw -pl juriscore-app -am spring-boot:run
+
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+
+juriscore:
+  security:
+    jwt:
+      # Development only, and it is committed on purpose so a checkout runs.
+      # Deployed environments read this from Secrets Manager; see README.md.
+      secret: ZGV2LW9ubHktc2VjcmV0LWRvLW5vdC11c2UtaW4tcHJvZHVjdGlvbi0xMjM0NQ==
+  aws:
+    endpoint: http://localhost:4566
+
+management:
+  endpoint:
+    health:
+      # Local only. Shows which dependency is down without needing a token, which is the
+      # whole point during setup. The details are component names and versions — no
+      # credentials — but prod still narrows this to nothing.
+      show-details: always
+
+logging:
+  level:
+    com.juriscore: DEBUG
+    org.springframework.web: INFO
+    # Uncomment when you need to see the SQL Hibernate actually issues.
+    # org.hibernate.SQL: DEBUG
+    # org.hibernate.orm.jdbc.bind: TRACE

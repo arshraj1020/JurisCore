@@ -1,0 +1,18 @@
+# Used when the app itself runs inside Compose: service names replace localhost.
+
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/juriscore
+  data:
+    redis:
+      host: redis
+
+juriscore:
+  aws:
+    endpoint: http://localstack:4566
+
+management:
+  endpoint:
+    health:
+      # Same reasoning as the local profile: this stack is a developer's machine.
+      show-details: always

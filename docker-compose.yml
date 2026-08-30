@@ -1,0 +1,107 @@
+# =============================================================================
+# Local JurisCore stack.
+#
+#   docker compose up -d postgres redis localstack   # infra only, run the app from your IDE
+#   docker compose up --build                        # everything, app included
+#
+# LocalStack stands in for S3 and SQS so nothing here needs an AWS account, and
+# the same SDK code runs unchanged against real AWS in deployed environments.
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: juriscore-postgres
+    environment:
+      POSTGRES_DB: juriscore
+      POSTGRES_USER: juriscore
+      POSTGRES_PASSWORD: juriscore
+      # Deterministic collation, so ORDER BY matches production regardless of host locale.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U juriscore -d juriscore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [juriscore]
+
+  redis:
+    image: redis:7-alpine
+    container_name: juriscore-redis
+    command: ["redis-server", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [juriscore]
+
+  localstack:
+    image: localstack/localstack:3.8
+    container_name: juriscore-localstack
+    environment:
+      SERVICES: s3,sqs
+      DEBUG: "0"
+      AWS_DEFAULT_REGION: ap-south-1
+    ports:
+      - "4566:4566"
+    volumes:
+      # Anything in this directory runs once LocalStack is ready.
+      - ./docker/localstack:/etc/localstack/init/ready.d:ro
+    healthcheck:
+      # Deliberately checks for the resources the init script creates, not merely that
+      # the API answers. LocalStack reports itself up before its ready.d hooks have run,
+      # so a liveness-style check would let dependents start against an empty account and
+      # fail on their first S3 or SQS call.
+      test: ["CMD-SHELL", "awslocal s3api head-bucket --bucket juriscore-documents && awslocal sqs get-queue-url --queue-name juriscore-notifications && awslocal sqs get-queue-url --queue-name juriscore-audit-dlq"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 25s
+    networks: [juriscore]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: juriscore-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      localstack:
+        # Only service_started. Nothing in Phase 1 touches S3 or SQS, so blocking the
+        # application for ~30s on LocalStack's bootstrap every `compose up` buys nothing.
+        # This becomes service_healthy in Phase 4, when document storage makes the bucket
+        # a genuine startup dependency.
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      JURISCORE_DB_URL: jdbc:postgresql://postgres:5432/juriscore
+      JURISCORE_DB_USER: juriscore
+      JURISCORE_DB_PASSWORD: juriscore
+      JURISCORE_REDIS_HOST: redis
+      JURISCORE_AWS_ENDPOINT: http://localstack:4566
+      AWS_REGION: ap-south-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      # Local-only value; deployed environments read this from Secrets Manager.
+      JURISCORE_JWT_SECRET: ${JURISCORE_JWT_SECRET:-ZGV2LW9ubHktc2VjcmV0LWRvLW5vdC11c2UtaW4tcHJvZHVjdGlvbi0xMjM0NQ==}
+      JURISCORE_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - "8080:8080"
+    networks: [juriscore]
+
+volumes:
+  postgres-data:
+
+networks:
+  juriscore:
+    driver: bridge
