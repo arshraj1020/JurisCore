@@ -76,8 +76,39 @@ spring:
 server:
   port: ${SERVER_PORT:8080}
   shutdown: graceful
-  # Trust X-Forwarded-* from the load balancer so redirects and client IPs are right.
-  forward-headers-strategy: framework
+  # Forwarding headers are honoured only when the request actually arrived from a proxy
+  # this deployment trusts. `native` delegates that to Tomcat's RemoteIpValve, which walks
+  # X-Forwarded-For from the RIGHT, discarding entries whose address matches
+  # `internal-proxies`, and stops at the first address that does not match. Behind the ALB
+  # that is the address the ALB itself appended — the real client — and anything a caller
+  # injected further left is never reached.
+  #
+  # It was `framework` until the rate-limit bypass was found. Spring's ForwardedHeaderFilter
+  # has no notion of a trusted proxy in this version (its own javadoc says the deployment is
+  # expected to strip untrusted headers before they arrive) and it takes the LEFTMOST
+  # X-Forwarded-For entry. An ALB appends to that header rather than replacing it, so a
+  # request sent with `X-Forwarded-For: 1.2.3.4` reached the application as
+  # `1.2.3.4, <real client>` and the application believed 1.2.3.4. Any anonymous caller
+  # could therefore pick their own rate-limit bucket, and rotating the header made the
+  # sign-in limit unenforceable. RateLimitBucketIT is the regression test.
+  #
+  # The one capability lost by moving off `framework` is X-Forwarded-Prefix, which the valve
+  # does not implement. Nothing here is served under a path prefix; if that changes, the
+  # prefix has to be handled before this can stay as it is.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      remote-ip-header: x-forwarded-for
+      protocol-header: x-forwarded-proto
+      # THE TRUST BOUNDARY. Only a peer matching this may supply forwarding information;
+      # for everyone else the headers are ignored entirely and the connection's own address
+      # is used. This is Boot's default value written out, because it is load-bearing
+      # security configuration and should not be an inherited default nobody knew was
+      # there: RFC1918, loopback, link-local and CGNAT — which is where a load balancer
+      # inside a VPC sits. Narrowing it is always safe. Widening it is what re-opens the
+      # hole, so anything added here needs to be an address range that cannot originate
+      # from the internet.
+      internal-proxies: '10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|100\.6[4-9]{1}\.\d{1,3}\.\d{1,3}|100\.[7-9]{1}\d{1}\.\d{1,3}\.\d{1,3}|100\.1[0-1]{1}\d{1}\.\d{1,3}\.\d{1,3}|100\.12[0-7]{1}\.\d{1,3}\.\d{1,3}|172\.1[6-9]{1}\.\d{1,3}\.\d{1,3}|172\.2[0-9]{1}\.\d{1,3}\.\d{1,3}|172\.3[0-1]{1}\.\d{1,3}\.\d{1,3}|0:0:0:0:0:0:0:1|::1'
   compression:
     enabled: true
     mime-types: application/json

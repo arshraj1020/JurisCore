@@ -23,7 +23,9 @@ import java.io.IOException;
  *
  * <p>Runs after authentication so an authenticated caller is limited by user id rather
  * than by IP — otherwise a whole firm behind one office NAT shares a single budget.
- * Anonymous traffic, including every sign-in attempt, falls back to the client address.
+ * Anonymous traffic, including every sign-in attempt, falls back to the client address,
+ * which is taken from the connection and never from a header the caller controls. See
+ * {@link #clientAddress}.
  */
 @Component
 @Order(50)
@@ -62,15 +64,31 @@ public class RateLimitFilter extends OncePerRequestFilter {
         return CurrentUser.find()
                 .map(AuthenticatedUser::userId)
                 .map(userId -> "user:" + userId)
-                .orElseGet(() -> "ip:" + clientIp(request));
+                .orElseGet(() -> "ip:" + clientAddress(request));
     }
 
-    private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded == null || forwarded.isBlank()) {
-            return request.getRemoteAddr();
-        }
-        return forwarded.split(",")[0].trim();
+    /**
+     * The address this request is budgeted against — and the single place that decides it.
+     *
+     * <p>{@code getRemoteAddr()} only, deliberately. This used to read
+     * {@code X-Forwarded-For} and take the leftmost entry, which is the entry a caller
+     * writes: any anonymous client could name its own bucket, and rotating the header
+     * through a dozen values bought a dozen fresh budgets, so the sign-in limit could be
+     * walked straight past. {@code RateLimitBucketIT} is the regression test.
+     *
+     * <p>Reading a forwarding header here would be wrong even if it were parsed correctly,
+     * because a filter is the wrong place to decide who may be believed. That decision is
+     * configuration — {@code server.tomcat.remoteip.internal-proxies} — and it is enforced
+     * before this class runs: Tomcat's RemoteIpValve replaces {@code getRemoteAddr()} with
+     * the real client address when, and only when, the request arrived from a trusted
+     * proxy. When it did not, this is the address of whoever actually opened the
+     * connection, which is the only thing a remote caller cannot forge.
+     *
+     * <p>So there is exactly one source of truth for the client address, it has one
+     * configuration knob, and nothing in application code parses a forwarding header.
+     */
+    private String clientAddress(HttpServletRequest request) {
+        return request.getRemoteAddr();
     }
 
     private void reject(HttpServletResponse response) throws IOException {

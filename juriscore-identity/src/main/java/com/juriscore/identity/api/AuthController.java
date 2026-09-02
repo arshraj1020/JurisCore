@@ -77,14 +77,23 @@ public class AuthController {
     }
 
     /**
-     * Prefers {@code X-Forwarded-For} because the app sits behind an ALB; only the first
-     * hop in that header is meaningful, the rest is client-controlled.
+     * The address recorded against the session, for the audit trail.
+     *
+     * <p>{@code getRemoteAddr()} only. This used to prefer the leftmost
+     * {@code X-Forwarded-For} entry on the reasoning that the app sits behind an ALB — but
+     * an ALB <em>appends</em> to that header rather than replacing it, so the leftmost
+     * entry is whatever the caller sent, not the first hop. Every sign-in could therefore
+     * be attributed to an address of the attacker's choosing, which is worse than useless
+     * in the one record that exists to say where a session came from.
+     *
+     * <p>Whether a forwarding header may be believed is decided by
+     * {@code server.tomcat.remoteip.internal-proxies}, before any application code runs;
+     * Tomcat's RemoteIpValve resolves the real client address when the request came from a
+     * trusted proxy and leaves the connection's address alone when it did not. The same
+     * single source of truth as the rate limiter — see {@code RateLimitFilter}.
      */
     private AuthService.RequestContext contextOf(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        String ip = (forwarded == null || forwarded.isBlank())
-                ? request.getRemoteAddr()
-                : forwarded.split(",")[0].trim();
-        return new AuthService.RequestContext(ip, request.getHeader("User-Agent"));
+        return new AuthService.RequestContext(
+                request.getRemoteAddr(), request.getHeader("User-Agent"));
     }
 }
