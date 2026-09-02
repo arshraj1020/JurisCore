@@ -7,9 +7,11 @@ import com.juriscore.identity.security.UserTokenState;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -31,6 +33,44 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Page<User> findByOrganizationIdAndRole(UUID organizationId, Role role, Pageable pageable);
 
     long countByOrganizationIdAndRoleAndStatus(UUID organizationId, Role role, UserStatus status);
+
+    /**
+     * Counts one failed sign-in, in the database rather than on a loaded entity.
+     *
+     * <p>Two targeted columns, so a stale in-memory copy of the row cannot overwrite
+     * anything else, and {@code x = x + 1} rather than a read-modify-write, so parallel
+     * attempts against one account cannot lose increments between them. Called only from
+     * {@link com.juriscore.identity.service.LoginAttemptRecorder}, which runs it in a
+     * transaction that commits independently of the sign-in it belongs to.
+     *
+     * @return 1 when the account exists, 0 when it does not
+     */
+    @Modifying
+    @Query("""
+            update User u
+               set u.failedLoginAttempts = u.failedLoginAttempts + 1
+             where u.id = :userId
+            """)
+    int countFailedLoginAttempt(@Param("userId") UUID userId);
+
+    /**
+     * Locks the account, but only once the counter above has reached the threshold.
+     *
+     * <p>The threshold lives in the predicate rather than in Java so the decision is made
+     * against the committed counter, not against whatever the caller last read.
+     *
+     * @return 1 when the account was locked, 0 when it is not yet at the threshold
+     */
+    @Modifying
+    @Query("""
+            update User u
+               set u.lockedUntil = :lockedUntil
+             where u.id = :userId
+               and u.failedLoginAttempts >= :threshold
+            """)
+    int lockIfAttemptsReached(@Param("userId") UUID userId,
+                              @Param("threshold") int threshold,
+                              @Param("lockedUntil") Instant lockedUntil);
 
     /**
      * Two-column projection read on every authenticated request. It is a primary-key

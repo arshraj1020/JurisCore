@@ -12,7 +12,6 @@ import com.juriscore.identity.domain.UserStatus;
 import com.juriscore.identity.repository.PasswordResetTokenRepository;
 import com.juriscore.identity.repository.RefreshTokenRepository;
 import com.juriscore.identity.repository.UserRepository;
-import com.juriscore.identity.security.AuthProperties;
 import com.juriscore.identity.security.JwtProperties;
 import com.juriscore.identity.security.JwtService;
 import com.juriscore.identity.security.TokenHasher;
@@ -61,11 +60,12 @@ class AuthServiceTest {
     @Mock
     private SessionRevoker sessionRevoker;
     @Mock
+    private LoginAttemptRecorder loginAttemptRecorder;
+    @Mock
     private EventPublisher eventPublisher;
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder(4);
     private JwtProperties jwtProperties;
-    private AuthProperties authProperties;
     private AuthService authService;
 
     @BeforeEach
@@ -75,20 +75,19 @@ class AuthServiceTest {
                 .encodeToString("a-test-secret-that-is-long-enough-for-hs256".getBytes()));
         jwtProperties.setIssuer("juriscore");
 
-        authProperties = new AuthProperties();
-        authProperties.setMaxFailedAttempts(3);
-        authProperties.setLockDuration(Duration.ofMinutes(15));
-
+        // The lock threshold and duration now belong to LoginAttemptRecorder, which is
+        // mocked here: this test asserts what sign-in *reports*, and AccountLockoutIT
+        // asserts what the database ends up holding.
         authService = new AuthService(
                 userRepository,
                 refreshTokenRepository,
                 passwordResetTokenRepository,
                 organizationService,
                 sessionRevoker,
+                loginAttemptRecorder,
                 passwordEncoder,
                 new JwtService(jwtProperties),
                 jwtProperties,
-                authProperties,
                 eventPublisher);
 
         when(refreshTokenRepository.save(any(RefreshToken.class)))
@@ -128,23 +127,58 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("locks the account once failed attempts reach the configured limit")
-    void locksAfterRepeatedFailures() {
+    @DisplayName("every failed sign-in is handed to the recorder, which persists it outside this transaction")
+    void recordsEveryFailedAttempt() {
         User user = activeUser();
         when(userRepository.findByEmailIgnoreCase(anyString())).thenReturn(Optional.of(user));
         var wrongPassword = new LoginRequest("asha@example-firm.test", "Wr0ng!Password123");
 
         for (int attempt = 0; attempt < 3; attempt++) {
             assertThatThrownBy(() -> authService.login(wrongPassword, AuthService.RequestContext.unknown()))
-                    .isInstanceOf(ApiException.class);
+                    .isInstanceOfSatisfying(ApiException.class,
+                            e -> assertThat(e.errorCode()).isEqualTo(ErrorCode.INVALID_CREDENTIALS));
         }
 
-        assertThat(user.isLocked()).isTrue();
-        // Even the right password is refused while the lock holds.
+        verify(loginAttemptRecorder, times(3)).recordFailure(user.getId());
+    }
+
+    @Test
+    @DisplayName("this test deliberately does not assert the lock on the in-memory user")
+    void doesNotJudgeLockingFromTheLoadedEntity() {
+        // The previous version of this test asserted user.isLocked() after three failures
+        // and passed for a year while the feature did nothing. A mocked repository has no
+        // transaction, so a mutation on the loaded entity survives here and is discarded
+        // in production. Counting and locking now happen in the database, inside
+        // LoginAttemptRecorder's own transaction, and only AccountLockoutIT can see it.
+        User user = activeUser();
+        when(userRepository.findByEmailIgnoreCase(anyString())).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.login(
+                new LoginRequest("asha@example-firm.test", "Wr0ng!Password123"),
+                AuthService.RequestContext.unknown()))
+                .isInstanceOf(ApiException.class);
+
+        assertThat(user.getFailedLoginAttempts())
+                .as("sign-in must not write the counter through the entity it loaded")
+                .isZero();
+        verify(userRepository, never()).save(user);
+    }
+
+    @Test
+    @DisplayName("a locked account is refused even when the password is right")
+    void lockedAccountRefusesTheCorrectPassword() {
+        User user = activeUser();
+        // The state the database holds once the recorder has locked the account.
+        user.setLockedUntil(Instant.now().plus(Duration.ofMinutes(5)));
+        when(userRepository.findByEmailIgnoreCase(anyString())).thenReturn(Optional.of(user));
+
         assertThatThrownBy(() -> authService.login(
                 new LoginRequest("asha@example-firm.test", PASSWORD), AuthService.RequestContext.unknown()))
                 .isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.errorCode()).isEqualTo(ErrorCode.ACCOUNT_LOCKED));
+
+        // The lock short-circuits before the password is checked, so nothing new is counted.
+        verify(loginAttemptRecorder, never()).recordFailure(any());
     }
 
     @Test

@@ -20,7 +20,6 @@ import com.juriscore.identity.event.UserRegisteredEvent;
 import com.juriscore.identity.repository.PasswordResetTokenRepository;
 import com.juriscore.identity.repository.RefreshTokenRepository;
 import com.juriscore.identity.repository.UserRepository;
-import com.juriscore.identity.security.AuthProperties;
 import com.juriscore.identity.security.JwtProperties;
 import com.juriscore.identity.security.JwtService;
 import com.juriscore.identity.security.TokenHasher;
@@ -61,10 +60,10 @@ public class AuthService {
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final OrganizationService organizationService;
     private final SessionRevoker sessionRevoker;
+    private final LoginAttemptRecorder loginAttemptRecorder;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final JwtProperties jwtProperties;
-    private final AuthProperties authProperties;
     private final EventPublisher eventPublisher;
 
     // ---------------------------------------------------------------- registration
@@ -141,13 +140,23 @@ public class AuthService {
         return issueTokens(user, context);
     }
 
+    /**
+     * Hands the failure to {@link LoginAttemptRecorder}, whose transaction commits
+     * independently of this one.
+     *
+     * <p>This used to increment the counter on the loaded {@code User} and let dirty
+     * checking persist it. It never did: {@link #login} is {@code @Transactional} and
+     * throws {@code ApiException} — a {@code RuntimeException} — on the next line, so the
+     * transaction was marked rollback-only and the update discarded. Every failed sign-in
+     * on the platform left {@code failed_login_attempts} at zero, and
+     * {@code max-failed-attempts} was configuration with no effect.
+     *
+     * <p>The unit test that covered this passed throughout, because a mocked repository
+     * has no transaction to roll back and the mutation survived on the in-memory object.
+     * {@code AccountLockoutIT} is the regression test; it reads the row back.
+     */
     private void registerFailedAttempt(User user) {
-        int attempts = user.getFailedLoginAttempts() + 1;
-        user.setFailedLoginAttempts(attempts);
-        if (attempts >= authProperties.getMaxFailedAttempts()) {
-            user.setLockedUntil(Instant.now().plus(authProperties.getLockDuration()));
-            log.warn("Locking user {} after {} failed sign-in attempts", user.getId(), attempts);
-        }
+        loginAttemptRecorder.recordFailure(user.getId());
     }
 
     // ----------------------------------------------------------------------- refresh
