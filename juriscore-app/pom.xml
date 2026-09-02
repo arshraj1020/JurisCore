@@ -81,6 +81,19 @@
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!--
+            Needed to compile DockerEnvironmentInitializer against LauncherSessionListener,
+            the earliest extension point the JUnit Platform offers. Surefire and Failsafe
+            already put the launcher on the runtime classpath; declaring it here is what
+            makes the interface visible at compile time. Version comes from junit-bom,
+            which spring-boot-dependencies imports — nothing new to keep in step.
+        -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

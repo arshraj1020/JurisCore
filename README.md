@@ -50,7 +50,7 @@ and it correctly fails when a cross-tenant 403 or an account-enumeration oracle 
 **Not executed here:** `mvn verify`, application startup, and the Docker image build.
 Maven Central and the Docker registry are both blocked by this environment's network
 allowlist, so no dependency can be resolved and no base image pulled. In place of a
-compiler the tree is checked with a Java 21 parser (82/82 files parse) and a
+compiler the tree is checked with a Java 21 parser (83/83 files parse) and a
 cross-reference pass over enum constants, Lombok builder properties, constructor arity,
 static-call arity, Spring Data derived-query property names and JPQL paths — zero
 unresolved references, zero unused imports. That is a good deal stronger than a read-through

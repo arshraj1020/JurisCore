@@ -1,0 +1,4 @@
+# Runs before JUnit discovers any test class, so the Docker endpoint is resolved before
+# anything can initialise Testcontainers' DockerClientFactory (which caches its strategy
+# on first use, for the life of the JVM).
+com.juriscore.DockerEnvironmentInitializer

@@ -33,10 +33,47 @@
 
         <!-- Kept in step with the parent above; used to pin the annotation processors. -->
         <spring.boot.version>3.3.5</spring.boot.version>
+
+        <!--
+            Overrides the Testcontainers version managed by spring-boot-dependencies.
+
+            Boot 3.3.5 pins Testcontainers 1.20.x, whose Docker Desktop strategy does not
+            look at ~/.docker/run/docker.sock, the user-scoped endpoint current Docker
+            Desktop publishes on macOS. 1.21.x does look there, so this override is what
+            lets a stock Docker Desktop install be found at all.
+
+            It is *not* what makes the build work against Docker Engine 29. Every
+            Testcontainers up to and including 1.21.3 pins its Docker client to API version
+            1.32 in DockerClientProviderStrategy.getClientForConfig, and Engine 29 answers
+            HTTP 400 to anything below its minimum of 1.44. That is negotiated at run time
+            by DockerApiVersion in test scope — see its javadoc for the full chain.
+
+            1.21.4 raises that hardcoded fallback to 1.44 and retries at 1.32. Moving to it
+            is reasonable belt and braces, but it swaps one fixed number for another and
+            does not remove the need to ask the daemon.
+
+            Overriding the property is the documented way to move a Boot-managed version;
+            no BOM import is needed because spring-boot-dependencies declares Testcontainers
+            through exactly this property.
+        -->
+        <testcontainers.version>1.21.3</testcontainers.version>
         <jjwt.version>0.12.6</jjwt.version>
         <springdoc.version>2.6.0</springdoc.version>
         <aws.sdk.version>2.28.29</aws.sdk.version>
+
+        <!--
+            Note that setting this property *overrides* the Lombok version Spring Boot
+            manages. That is intentional so the annotation-processor path below can pin the
+            same coordinate, but it means a future Boot upgrade will not move Lombok — if
+            Boot moves and this does not, the build keeps the old Lombok silently.
+
+            Lombok is a compiler plugin, not a library: it reaches into javac's internals,
+            so its compatibility is with the JDK *running Maven*, not with
+            maven.compiler.release. 1.18.34 covers JDK 21 and 22 and does not cover 23+.
+            The enforcer rule below exists because of exactly that coupling.
+        -->
         <lombok.version>1.18.34</lombok.version>
+        <maven-enforcer-plugin.version>3.4.1</maven-enforcer-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -106,6 +143,61 @@
     </dependencies>
 
     <build>
+        <plugins>
+            <!--
+                Fails the build in one clear line when it is run on the wrong JDK, instead
+                of letting it die inside javac.
+
+                Lombok instruments the compiler it runs inside, so it is bound to the JDK
+                that *Maven* is running on. `maven.compiler.release` does not constrain
+                that — it only sets the bytecode target — so a build launched on a JDK
+                Lombok does not know still targets 21 and still crashes, with
+
+                    Fatal error compiling: java.lang.ExceptionInInitializerError:
+                    com.sun.tools.javac.code.TypeTag :: UNKNOWN
+
+                which names neither Lombok nor the JDK and sends people looking at their
+                source code. Checking up front turns that into an actionable message, and
+                keeps host builds identical to CI and to the Docker image, both of which
+                run Maven on JDK 21.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>${maven-enforcer-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>enforce-build-jdk</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>[21,22)</version>
+                                    <message>
+JurisCore must be built on JDK 21.
+
+Maven is running on a different JDK. Note that this is about the JDK running Maven
+(JAVA_HOME), not the one on your PATH: check `mvn -version`, not `java -version`.
+
+Why it matters: Lombok is an annotation processor that manipulates javac's internal
+AST, so it must match the JDK the compiler runs in. Building on another JDK fails
+inside javac with "com.sun.tools.javac.code.TypeTag :: UNKNOWN", which looks like a
+source error and is not one. CI and the Docker image both build on JDK 21.
+
+Fix:  export JAVA_HOME=$(/usr/libexec/java_home -v 21)   # macOS
+      mvn -version    # confirm it now reports 21
+                                    </message>
+                                </requireJavaVersion>
+                            </rules>
+                            <failFast>true</failFast>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+
         <pluginManagement>
             <plugins>
                 <plugin>

@@ -29,6 +29,19 @@ import org.testcontainers.utility.DockerImageName;
 @ActiveProfiles("test")
 public abstract class AbstractIntegrationTest {
 
+    static {
+        // Backstop only. Both of these are normally done by DockerEnvironmentInitializer,
+        // a LauncherSessionListener that runs before JUnit discovers any test class —
+        // which is the only way to be certain nothing has already initialised
+        // Testcontainers' DockerClientFactory, since that caches its strategy on first use
+        // for the life of the JVM. These calls cover runners that bypass the JUnit Platform
+        // launcher; both are idempotent, so when the listener has already run they do
+        // nothing. Their position above the container fields still matters, because static
+        // initialisers execute in source order.
+        DockerEnvironment.ensureConfigured();
+        DockerApiVersion.ensureNegotiated();
+    }
+
     static final PostgreSQLContainer<?> POSTGRES =
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("juriscore")
