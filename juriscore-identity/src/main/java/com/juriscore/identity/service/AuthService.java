@@ -176,12 +176,21 @@ public class AuthService {
                 .orElseThrow(() -> new ApiException(ErrorCode.REFRESH_TOKEN_INVALID));
 
         if (stored.isRevoked()) {
-            log.warn("Refresh token reuse detected for user {} — revoking all sessions", stored.getUserId());
-            // Committed independently: the exception below rolls this transaction back.
-            // Everything, not just the refresh rows: reuse means a credential is in the wrong
-            // hands, and whoever rotated this token first is holding an access token that the
-            // API would otherwise keep accepting for the rest of its 15 minutes.
-            sessionRevoker.revokeEverythingForUser(stored.getUserId());
+            // Only a token that was *rotated* is evidence of theft: it was exchanged for a
+            // successor, so a second presentation means two parties hold it. A token revoked
+            // by signing out was exchanged for nothing, and replaying one is what a stale
+            // client does when it retries a queued request — answering that with the theft
+            // response let anyone holding a long-dead token from an old device keep the
+            // account signed out indefinitely, and buried real detections in false alarms.
+            if (stored.wasRotated()) {
+                log.warn("Refresh token reuse detected for user {} — revoking all sessions",
+                        stored.getUserId());
+                // Committed independently: the exception below rolls this transaction back.
+                // Everything, not just the refresh rows: reuse means a credential is in the
+                // wrong hands, and whoever rotated this token first is holding an access token
+                // that the API would otherwise keep accepting for the rest of its 15 minutes.
+                sessionRevoker.revokeEverythingForUser(stored.getUserId());
+            }
             throw new ApiException(ErrorCode.REFRESH_TOKEN_INVALID);
         }
         if (stored.isExpired()) {

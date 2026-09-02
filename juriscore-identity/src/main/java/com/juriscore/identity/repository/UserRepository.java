@@ -43,6 +43,15 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      * {@link com.juriscore.identity.service.LoginAttemptRecorder}, which runs it in a
      * transaction that commits independently of the sign-in it belongs to.
      *
+     * <p>Deliberately <em>not</em> {@code update versioned}, unlike the two updates that write
+     * lock and revocation state. Those move the version so that a request holding a stale copy
+     * of the row fails rather than overwriting them. This one fires on every wrong password,
+     * so versioning it would let anyone guessing passwords make a colleague's profile or role
+     * edit fail with a conflict at will — a nuisance the attacker controls. It does not need
+     * the guard either: {@code @DynamicUpdate} on {@link com.juriscore.identity.domain.User}
+     * means no other write mentions this column unless it means to reset it, which only a
+     * successful sign-in and a password change do.
+     *
      * @return 1 when the account exists, 0 when it does not
      */
     @Modifying
@@ -63,7 +72,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      */
     @Modifying
     @Query("""
-            update User u
+            update versioned User u
                set u.lockedUntil = :lockedUntil
              where u.id = :userId
                and u.failedLoginAttempts >= :threshold
@@ -90,7 +99,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
      */
     @Modifying
     @Query("""
-            update User u
+            update versioned User u
                set u.tokenGeneration = u.tokenGeneration + 1
              where u.id = :userId
             """)

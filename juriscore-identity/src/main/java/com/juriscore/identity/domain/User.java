@@ -13,6 +13,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.DynamicUpdate;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -31,6 +32,20 @@ import java.util.UUID;
  * a platform where picking the wrong tenant means seeing the wrong case files.
  */
 @Entity
+/*
+ * Only genuinely changed columns are written.
+ *
+ * Without this, Hibernate emits every mapped column on every flush, carrying the values the
+ * entity was loaded with. Three columns here are owned by targeted updates from other
+ * transactions — token_generation, failed_login_attempts and locked_until — so a request
+ * that loaded this row a moment before one of those ran would write the pre-update values
+ * back over it on commit, silently. That reverted global revocation and cleared account
+ * lockouts; StaleUserWriteIT is the regression test.
+ *
+ * The narrower statement is also what makes the version guard meaningful for those columns:
+ * a flush that never mentions token_generation cannot lose a race for it.
+ */
+@DynamicUpdate
 @Table(
         name = "users",
         schema = "identity",

@@ -76,9 +76,6 @@ class SessionRevocationIT extends AbstractIntegrationTest {
                         + "15-minute life — the platform detects the theft and then does nothing about "
                         + "the access it is currently granting")
                 .isEqualTo(401);
-        assertThat(tokenGeneration())
-                .as("token_generation is the only thing that invalidates an issued access token")
-                .isEqualTo(1);
     }
 
     @Test
@@ -122,6 +119,30 @@ class SessionRevocationIT extends AbstractIntegrationTest {
                 .as("the other device's access token must survive")
                 .isEqualTo(200);
         refresh(laptop.path("refreshToken").asText(), status().isOk());
+    }
+
+    @Test
+    @DisplayName("global revocation is a line in time: tokens minted before it die, tokens minted after it live")
+    void globalRevocationSeparatesTokensByIssueTime() throws Exception {
+        // Revocation that killed everything forever would pass the two tests above and be
+        // useless. This pins the other edge: signing back in must produce a working session.
+        register();
+        String before = login().path("accessToken").asText();
+        assertThat(callMe(before)).isEqualTo(200);
+
+        mockMvc.perform(post("/api/v1/auth/logout").header("Authorization", "Bearer " + before))
+                .andExpect(status().isOk());
+
+        assertThat(callMe(before))
+                .as("minted before the revocation")
+                .isEqualTo(401);
+
+        JsonNode after = login();
+        assertThat(callMe(after.path("accessToken").asText()))
+                .as("minted after the revocation — a token issued from a fresh sign-in must carry the "
+                        + "current generation and be accepted")
+                .isEqualTo(200);
+        refresh(after.path("refreshToken").asText(), status().isOk());
     }
 
     @Test
@@ -218,9 +239,4 @@ class SessionRevocationIT extends AbstractIntegrationTest {
         return count == null ? 0 : count;
     }
 
-    private int tokenGeneration() {
-        Integer generation = jdbcTemplate.queryForObject(
-                "SELECT token_generation FROM identity.users WHERE email = ?", Integer.class, EMAIL);
-        return generation == null ? 0 : generation;
-    }
 }

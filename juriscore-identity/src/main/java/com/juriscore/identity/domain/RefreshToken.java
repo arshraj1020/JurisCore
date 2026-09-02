@@ -71,6 +71,24 @@ public class RefreshToken extends BaseEntity {
         return !isRevoked() && !isExpired();
     }
 
+    /**
+     * Whether this token was retired by being <em>exchanged</em> for a successor.
+     *
+     * <p>{@link #isRevoked()} does not answer that. {@code revokedAt} is set by three
+     * different events — rotation, signing out of one session, and revoking every session —
+     * and only rotation means the token was handed in for another. That is the difference
+     * between a token being dead and a token being replayed: presenting a rotated token
+     * means two parties hold it, which is theft, while presenting one that was revoked by a
+     * sign-out means a stale client retried a request nobody exchanged anything for.
+     *
+     * <p>Safe to rely on: {@code replacedBy} is written in the same statement that rotates a
+     * token and nowhere else, and the bulk revocation used by sign-out only touches rows
+     * where {@code revokedAt is null}, so a rotated token keeps it.
+     */
+    public boolean wasRotated() {
+        return replacedBy != null;
+    }
+
     public void revoke() {
         if (revokedAt == null) {
             revokedAt = Instant.now();

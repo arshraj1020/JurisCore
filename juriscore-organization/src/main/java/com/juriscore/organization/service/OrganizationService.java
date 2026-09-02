@@ -49,12 +49,6 @@ public class OrganizationService {
                 .orElseThrow(() -> ApiException.notFound(ErrorCode.ORGANIZATION_NOT_FOUND, id));
     }
 
-    @Transactional(readOnly = true)
-    public Organization getBySlug(String slug) {
-        return repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound(ErrorCode.ORGANIZATION_NOT_FOUND, slug));
-    }
-
     @Transactional
     public Organization update(UUID id, UpdateOrganizationRequest request) {
         Organization organization = getById(id);

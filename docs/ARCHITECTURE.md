@@ -190,7 +190,9 @@ an oversight:
   until Phase 2 introduces the first `TenantAwareEntity`. See §2.
 - **No scheduled cleanup** of expired refresh and reset tokens. The repository methods
   (`deleteExpiredBefore`) exist and are indexed for it; no `@Scheduled` job calls them, so
-  both tables grow without bound. `@EnableScheduling` is on in anticipation.
+  both tables grow without bound. `@EnableScheduling` is deliberately off too — a
+  scheduler with nothing to schedule makes the configuration lie about what the
+  application does — and returns with the job that needs it.
 - **No PostgreSQL row-level security.**
 - **`SUPER_ADMIN` has no bootstrap path.** The role exists throughout the model and the
   first one has to be inserted by hand; `/organizations/{id}` is unreachable until then.

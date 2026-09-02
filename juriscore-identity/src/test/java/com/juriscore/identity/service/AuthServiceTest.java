@@ -213,9 +213,12 @@ class AuthServiceTest {
     @DisplayName("reusing an already-rotated token kills every session for that user")
     void refreshTokenReuseRevokesEverything() {
         User user = activeUser();
-        RefreshToken alreadyUsed = storedToken(user.getId(), Instant.now().plus(Duration.ofDays(7)));
-        alreadyUsed.revoke();
-        when(refreshTokenRepository.findByTokenHash(anyString())).thenReturn(Optional.of(alreadyUsed));
+        RefreshToken alreadyRotated = storedToken(user.getId(), Instant.now().plus(Duration.ofDays(7)));
+        alreadyRotated.revoke();
+        // What makes this reuse rather than merely a dead token: it was exchanged for a
+        // successor, so a second presentation means two parties are holding it.
+        alreadyRotated.setReplacedBy(UUID.randomUUID());
+        when(refreshTokenRepository.findByTokenHash(anyString())).thenReturn(Optional.of(alreadyRotated));
 
         assertThatThrownBy(() -> authService.refresh("stolen-token", AuthService.RequestContext.unknown()))
                 .isInstanceOfSatisfying(ApiException.class,
@@ -226,6 +229,23 @@ class AuthServiceTest {
         // access tokens already issued have to be retired too, not just the refresh rows.
         verify(sessionRevoker, times(1)).revokeEverythingForUser(user.getId());
         verify(sessionRevoker, never()).revokeAllForUser(user.getId());
+    }
+
+    @Test
+    @DisplayName("a token revoked without being rotated is simply invalid, and raises no alarm")
+    void revokedButNeverRotatedTokenDoesNotTriggerTheTheftResponse() {
+        User user = activeUser();
+        RefreshToken signedOut = storedToken(user.getId(), Instant.now().plus(Duration.ofDays(7)));
+        signedOut.revoke();
+        // No replacedBy: this is what signing out or revoking every session leaves behind.
+        when(refreshTokenRepository.findByTokenHash(anyString())).thenReturn(Optional.of(signedOut));
+
+        assertThatThrownBy(() -> authService.refresh("stale-token", AuthService.RequestContext.unknown()))
+                .isInstanceOfSatisfying(ApiException.class,
+                        e -> assertThat(e.errorCode()).isEqualTo(ErrorCode.REFRESH_TOKEN_INVALID));
+
+        verify(sessionRevoker, never()).revokeEverythingForUser(any());
+        verify(sessionRevoker, never()).revokeAllForUser(any());
     }
 
     @Test
