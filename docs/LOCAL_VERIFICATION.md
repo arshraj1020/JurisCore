@@ -116,7 +116,7 @@ mvn -B clean verify
 ```
 
 This runs, in order: compile → unit tests (Surefire) → integration tests (Failsafe) →
-package. **Expect 74 test cases across 8 classes, 0 failures.**
+package. **Expect 97 test cases across 9 classes, 0 failures.**
 
 The integration tests start **their own** PostgreSQL and Redis through Testcontainers on
 random host ports. They do not use the Compose containers from §3 and cannot collide with
@@ -131,6 +131,7 @@ What the suite holds down:
 | `JwtServiceTest` | unit | token round-trip, signature/issuer/expiry rejection, short-key refusal |
 | `AuthServiceTest` | unit | lockout, account-enumeration resistance, rotation, reuse |
 | `TenantGuardTest` | unit | the tenant guard's contract, ahead of Phase 2 |
+| `DockerApiVersionTest` | unit | Docker API version negotiation: parsing, HTTP decoding, the clamp rule |
 | `AuthFlowIT` | integration | registration, sign-in, rotation, invitation, error envelope |
 | `SecurityGuaranteesIT` | integration | token revocation, single-use reset links, RBAC, tenant isolation on writes |
 | `RateLimitIT` | integration | limit, atomicity, stranded-key recovery, fail-open |
@@ -280,9 +281,6 @@ mvn -B -pl juriscore-app dependency:tree -Dincludes='org.testcontainers:*,com.gi
 # stale cached choices — this file is machine config and can go out of date
 cat ~/.testcontainers.properties 2>/dev/null || echo "none (good)"
 ```
-
-`scripts/docker-api-trace.py` shows the actual HTTP conversation, including the request
-line the client sends, if you need to watch it rather than infer it.
 
 Last resort, and neither should be needed: `mvn ... -Dapi.version=1.44`, or
 `export DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')`.
