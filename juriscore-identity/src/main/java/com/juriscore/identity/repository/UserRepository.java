@@ -73,6 +73,30 @@ public interface UserRepository extends JpaRepository<User, UUID> {
                               @Param("lockedUntil") Instant lockedUntil);
 
     /**
+     * Invalidates every access token already issued to this user.
+     *
+     * <p>Access tokens are self-contained: nothing about revoking a refresh-token row stops
+     * the API accepting one. {@code token_generation} is what does — every token carries the
+     * generation it was minted under and {@link #findTokenState} is checked against this
+     * column on every authenticated request, so a bump here retires the whole outstanding
+     * set at once.
+     *
+     * <p>A targeted increment rather than a loaded entity, for the same reasons as
+     * {@link #countFailedLoginAttempt}: it touches one column, so no stale in-memory copy of
+     * the row can overwrite anything else, and it is safe to run from a transaction of its
+     * own while the caller holds the same row.
+     *
+     * @return 1 when the account exists, 0 when it does not
+     */
+    @Modifying
+    @Query("""
+            update User u
+               set u.tokenGeneration = u.tokenGeneration + 1
+             where u.id = :userId
+            """)
+    int invalidateIssuedAccessTokens(@Param("userId") UUID userId);
+
+    /**
      * Two-column projection read on every authenticated request. It is a primary-key
      * lookup returning an int and an enum, which Postgres answers from the index; the
      * alternative — trusting the JWT blindly for its full 15-minute life — would mean a

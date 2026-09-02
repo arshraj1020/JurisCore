@@ -178,7 +178,10 @@ public class AuthService {
         if (stored.isRevoked()) {
             log.warn("Refresh token reuse detected for user {} — revoking all sessions", stored.getUserId());
             // Committed independently: the exception below rolls this transaction back.
-            sessionRevoker.revokeAllForUser(stored.getUserId());
+            // Everything, not just the refresh rows: reuse means a credential is in the wrong
+            // hands, and whoever rotated this token first is holding an access token that the
+            // API would otherwise keep accepting for the rest of its 15 minutes.
+            sessionRevoker.revokeEverythingForUser(stored.getUserId());
             throw new ApiException(ErrorCode.REFRESH_TOKEN_INVALID);
         }
         if (stored.isExpired()) {
@@ -208,7 +211,10 @@ public class AuthService {
     @Transactional
     public void logout(UUID userId, String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
-            int revoked = refreshTokenRepository.revokeAllForUser(userId, Instant.now());
+            // "Every session" has to include the access tokens already handed out, or a user
+            // who signs out everywhere because they think they are compromised stays signed in
+            // until the last one expires.
+            int revoked = sessionRevoker.revokeEverythingForUser(userId);
             log.info("Signed user {} out of {} session(s)", userId, revoked);
             return;
         }

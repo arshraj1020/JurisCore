@@ -221,8 +221,11 @@ class AuthServiceTest {
                 .isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.errorCode()).isEqualTo(ErrorCode.REFRESH_TOKEN_INVALID));
 
-        // Committed in its own transaction, otherwise the exception above would undo it.
-        verify(sessionRevoker, times(1)).revokeAllForUser(user.getId());
+        // Committed in its own transaction, otherwise the exception above would undo it —
+        // and "everything", because reuse means a credential is in the wrong hands: the
+        // access tokens already issued have to be retired too, not just the refresh rows.
+        verify(sessionRevoker, times(1)).revokeEverythingForUser(user.getId());
+        verify(sessionRevoker, never()).revokeAllForUser(user.getId());
     }
 
     @Test

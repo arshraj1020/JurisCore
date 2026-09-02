@@ -1,5 +1,6 @@
 package com.juriscore.app.ratelimit;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.juriscore.AbstractIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -21,6 +22,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -77,6 +79,9 @@ class RateLimitBucketIT extends AbstractIntegrationTest {
 
     @Autowired
     private ApplicationContext applicationContext;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @BeforeEach
     void flushBuckets() {
@@ -199,6 +204,54 @@ class RateLimitBucketIT extends AbstractIntegrationTest {
                         + "X-Forwarded-For. Without a 429 among them, varying the header still buys an "
                         + "unlimited budget", attempts, limit)
                 .contains(429);
+    }
+
+    @Test
+    @DisplayName("an authenticated caller is budgeted by user id, never by address")
+    void anAuthenticatedCallerIsBudgetedByUserId() throws Exception {
+        // The counterpart to everything above. Anonymous traffic falls back to the address
+        // because there is nothing better; an authenticated caller must not, or a whole firm
+        // behind one office NAT would share a single budget and the first busy user would
+        // lock out their colleagues. Nothing covered this until now.
+        String accessToken = objectMapper.readTree(
+                        mockMvc.perform(post("/api/v1/auth/register")
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .content("""
+                                                {
+                                                  "firmName": "Sharma & Associates",
+                                                  "firstName": "Asha",
+                                                  "lastName": "Menon",
+                                                  "email": "asha@sharma-legal.test",
+                                                  "password": "Adv0cate!Chamber",
+                                                  "timezone": "Asia/Kolkata"
+                                                }
+                                                """))
+                                .andExpect(status().isCreated())
+                                .andReturn().getResponse().getContentAsString())
+                .path("data").path("accessToken").asText();
+
+        String userId = jdbcTemplate.queryForObject(
+                "SELECT id::text FROM identity.users WHERE email = ?",
+                String.class, "asha@sharma-legal.test");
+
+        // Registration itself was rate limited on the anonymous bucket; start clean.
+        flushBuckets();
+
+        mockMvc.perform(get("/api/v1/users/me")
+                        .header("Authorization", "Bearer " + accessToken)
+                        // A forwarding header must not matter either way for an authenticated call.
+                        .header("X-Forwarded-For", "203.0.113.7"))
+                .andExpect(status().isOk());
+
+        Set<String> keys = redisTemplate.keys(KEY_PATTERN);
+        log.info("[bucket probe] authenticated caller -> {}", keys);
+
+        assertThat(keys)
+                .as("an authenticated request must be bucketed on the caller's stable user id")
+                .containsExactly("ratelimit:api:user:" + userId);
+        assertThat(keys.iterator().next())
+                .as("it must not fall back to an address bucket")
+                .doesNotContain(":ip:");
     }
 
     // ------------------------------------------------------------------------ helpers
