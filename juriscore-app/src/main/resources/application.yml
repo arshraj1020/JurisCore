@@ -47,7 +47,7 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-    schemas: organization,identity,casework
+    schemas: organization,identity,casework,case_management
     default-schema: public
     validate-on-migrate: true
     # Never on: an out-of-order migration in production hides a real drift problem.

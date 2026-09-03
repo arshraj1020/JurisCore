@@ -31,6 +31,10 @@
             <groupId>com.juriscore</groupId>
             <artifactId>juriscore-casework</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.juriscore</groupId>
+            <artifactId>juriscore-case-management</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

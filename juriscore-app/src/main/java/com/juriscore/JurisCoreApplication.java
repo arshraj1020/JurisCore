@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 import org.springframework.boot.autoconfigure.domain.EntityScan;
@@ -24,13 +25,18 @@ import org.springframework.boot.autoconfigure.domain.EntityScan;
 // @EnableAsync backs the AFTER_COMMIT event listener, so a slow consumer cannot add
 // latency to the request that produced the event.
 //
-// @EnableScheduling is deliberately absent: nothing is scheduled in Phase 1. It returns
-// with the work that needs it — deadline reminders in Phase 3, and the cleanup job for
-// expired refresh and password-reset tokens (RefreshTokenRepository.deleteExpiredBefore
-// exists and its index is in place, but nothing calls it yet, so both tables grow
-// unbounded until then). Enabling a scheduler with nothing to schedule just makes the
-// configuration lie about what the application does.
+// @EnableScheduling arrives with Phase 3, which is the work Phase 1 said it was waiting
+// for: ReminderScheduler sweeps for due reminders. It stays off in the test profile via
+// juriscore.reminders.enabled, because an integration test asserting on reminder rows
+// while a background thread mutates them is a test that passes locally and fails on a
+// loaded runner.
+//
+// Still not scheduled, and still deliberately: the cleanup job for expired refresh and
+// password-reset tokens. RefreshTokenRepository.deleteExpiredBefore exists and its index
+// is in place, but nothing calls it, so both tables still grow unbounded. That is a
+// Phase 1 gap this phase did not close, not something enabling the scheduler fixed.
 @EnableAsync
+@EnableScheduling
 public class JurisCoreApplication {
 
     public static void main(String[] args) {

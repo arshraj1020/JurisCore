@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * insert by hand.
  */
 @Import(CapturingEventListener.class)
-abstract class AbstractCaseworkIT extends AbstractIntegrationTest {
+public abstract class AbstractCaseworkIT extends AbstractIntegrationTest {
 
     protected static final String PASSWORD = "Adv0cate!Chamber";
 
@@ -44,6 +44,7 @@ abstract class AbstractCaseworkIT extends AbstractIntegrationTest {
     }
 
     /** A firm, and a token for the administrator who created it by signing up. */
+    /** Public so the Phase 3 integration tests can build on this fixture rather than copy it. */
     protected record Firm(String id, String adminEmail, String adminToken) {
     }
 

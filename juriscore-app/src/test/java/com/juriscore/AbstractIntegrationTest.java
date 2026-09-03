@@ -93,7 +93,12 @@ public abstract class AbstractIntegrationTest {
                                casework.cases,
                                casework.case_assignments,
                                casework.case_events,
-                               casework.case_number_sequences
+                               casework.case_number_sequences,
+                               case_management.courts,
+                               case_management.hearings,
+                               case_management.tasks,
+                               case_management.deadlines,
+                               case_management.reminders
                 CASCADE
                 """);
     }

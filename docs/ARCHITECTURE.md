@@ -66,12 +66,12 @@ claim that quietly stops being true:
    see `UserRepository`, where the only lookup without it is the sign-in path, before a
    tenant is known. `SecurityGuaranteesIT` asserts this for reads *and writes*: a firm
    admin holding a valid token cannot suspend or re-role another firm's user.
-3. **Guard — not yet wired.** `TenantGuard` exists and `TenantGuardTest` proves it behaves
-   as specified, but nothing calls it in Phase 1, because no Phase 1 entity is a
-   `TenantAwareEntity` — `User` deliberately is not, since `SUPER_ADMIN` has no tenant. It
-   is the substrate for Phase 2, where cases, hearings and documents are all tenant-scoped
-   and loaded by id. It is tested now so that Phase 2 inherits something known-good rather
-   than something merely written.
+3. **Guard — active since Phase 2.** `TenantGuard` is called on every tenant-scoped entity
+   the moment it is loaded, in `CaseAccess` (casework) and in every case-management
+   service. It is redundant with layer 2 today and is meant to be: it is the layer that
+   still holds the day somebody adds a lookup without the predicate. No Phase 1 entity is
+   a `TenantAwareEntity` — `User` deliberately is not, since `SUPER_ADMIN` has no tenant —
+   which is why it sat unwired until there were tenant-scoped rows to guard.
 
 Both active layers return the module's *not found* code for a foreign tenant rather than
 *forbidden*, because a 403 confirms the record exists.
@@ -158,6 +158,58 @@ The DLQ policy is already in the LocalStack bootstrap: `maxReceiveCount` 3, then
 A message that has failed three times is failing for a reason a fourth attempt will not
 fix, and one poison message must not block the queue behind it.
 
+## 5a. Phase 3: case management
+
+A fourth module, `juriscore-case-management`, owning the `case_management` schema: courts,
+hearings, tasks, deadlines and reminders. One dependency edge, to `juriscore-casework`,
+because everything here hangs off a matter.
+
+**One timeline, not two.** A hearing being adjourned and a task being completed are things
+that happened on a *matter*, so they are written to the case timeline casework already
+owns, through `CaseTimelineService`. V3 widens the `ck_case_events_type` check constraint
+rather than creating a second history table. A matter with two histories is worse than an
+enum that grows.
+
+**The module boundary holds.** `CaseTimelineRecorder` is the only class that touches
+casework, and it uses `CaseAccess` and `CaseTimelineService` — never a repository.
+`IdentityFirmMemberDirectory` is the only class that touches identity, and it uses
+`UserService`. Everything else references other schemas by plain UUID.
+
+**Optimistic locking reaches the client.** Every Phase 3 update endpoint requires the
+`version` the caller last read, and answers 409 `CONCURRENT_MODIFICATION` on a mismatch.
+This is not a second locking mechanism — it is `BaseEntity.@Version`, made reachable over
+HTTP. Two people editing one hearing in two browser tabs are in separate transactions, so
+JPA alone never sees the conflict and the second save silently wins.
+
+**Retirement, not deletion.** Courts deactivate; tasks and deadlines soft-delete. The same
+reasoning as a soft-deleted client: a hearing held in 2019 has to keep naming the bench
+that heard it, and a timeline entry has to keep resolving to the task it describes. A
+court with hearings still listed ahead of it refuses to retire, because those listings
+would then point at something the firm has said it no longer uses.
+
+### Reminders, and what "sent" means
+
+`@EnableScheduling` arrives here — this is the work Phase 1 said it was waiting for.
+`ReminderScheduler` contributes a clock and nothing else; `ReminderDispatchService` does
+the work and is directly callable, which is how the integration tests drive it without
+waiting on a timer. The sweep is off in the test profile for the same reason.
+
+**Claiming is `FOR UPDATE SKIP LOCKED`.** Every instance behind the load balancer runs the
+same sweep on the same schedule, so "select the due rows, then update them" has all of
+them selecting the same rows and publishing the same reminder several times. The row lock
+makes the batches disjoint by construction: each instance locks what it takes and steps
+over what another has already locked. The lock is released by the same commit that writes
+`SENT`, so there is no window in which a row is claimed but still looks due. The
+alternative — a Redis lock, or a scheduler library with its own tables — is a dependency
+to operate and no more correct than a lock PostgreSQL is already keeping.
+
+**`SENT` means published, not delivered.** There is no email, SMS or push anywhere in this
+platform. A due reminder is marked `SENT` and published as `reminder.triggered`; the
+consumer that turns that into a message belongs to Phase 5. The reminder's `channel` is
+recorded intent for that consumer to read. This is said on the enum, on the column, on the
+response schema and in the API description, because a status called SENT is exactly the
+sort of thing a later reader takes at face value.
+
 ## 6. What Phase 1 deliberately leaves out
 
 - **API gateway.** One deployable needs no gateway. The ALB terminates TLS and routes; a
@@ -190,9 +242,9 @@ an oversight:
   until Phase 2 introduces the first `TenantAwareEntity`. See §2.
 - **No scheduled cleanup** of expired refresh and reset tokens. The repository methods
   (`deleteExpiredBefore`) exist and are indexed for it; no `@Scheduled` job calls them, so
-  both tables grow without bound. `@EnableScheduling` is deliberately off too — a
-  scheduler with nothing to schedule makes the configuration lie about what the
-  application does — and returns with the job that needs it.
+  both tables still grow without bound. `@EnableScheduling` is now on — Phase 3's reminder
+  sweep needed it — so this gap is one job away from closed, and closing it is no longer
+  blocked on anything.
 - **No PostgreSQL row-level security.**
 - **`SUPER_ADMIN` has no bootstrap path.** The role exists throughout the model and the
   first one has to be inserted by hand; `/organizations/{id}` is unreachable until then.

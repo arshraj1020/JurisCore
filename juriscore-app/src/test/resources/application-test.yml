@@ -19,6 +19,11 @@ juriscore:
   # containers to check a sign-in is a test people stop running.
   rate-limit:
     enabled: false
+  # The reminder sweep is driven directly by ReminderDispatchServiceIT rather than by the
+  # timer. A background thread mutating reminder rows while a test asserts on them is the
+  # classic test that is green locally and red on a busy runner.
+  reminders:
+    enabled: false
   aws:
     enabled: false
 
