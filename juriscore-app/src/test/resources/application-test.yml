@@ -24,6 +24,9 @@ juriscore:
   # classic test that is green locally and red on a busy runner.
   reminders:
     enabled: false
+  # aws.enabled=false selects InMemoryObjectStorageService, so the document rules are
+  # exercised for real against a stand-in that stores no bytes. Nothing here needs AWS
+  # credentials, LocalStack, or a network.
   aws:
     enabled: false
 

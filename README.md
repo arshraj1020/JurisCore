@@ -268,13 +268,18 @@ Phases follow the PRD.
 - **Phase 1 — Foundation**: project structure, identity, authentication,
   PostgreSQL, Docker, CI.
 - **Phase 2 — Core legal system**: clients, lawyers, cases, case timeline.
-- **Phase 3 — Court workflow** *(this release)*: courts, hearings, tasks, deadlines,
+- **Phase 3 — Court workflow**: courts, hearings, tasks, deadlines,
   reminders. Reminders are scheduled and published as domain events when they come due;
   **nothing delivers them** — there is still no email, SMS or push anywhere in the
   platform, so a reminder's `SENT` state means "announced on the event bus", not
   "received by a person".
-- **Phase 4 — Documents**: S3 storage, upload/download, versioning, sharing, presigned
-  URLs.
+- **Phase 4 — Documents** *(this release)*: case documents in S3, presigned upload and
+  download, metadata in PostgreSQL. Files never pass through the application: the browser
+  PUTs to a short-lived signed link and the platform confirms the upload against storage
+  afterwards. **Not implemented, and not claimed anywhere:** malware or content scanning,
+  OCR, previews, full-text search, document version history, external sharing, and any
+  client-facing access — a client of a firm still cannot reach its documents, because the
+  explicit sharing mechanism that would allow it does not exist.
 - **Phase 5 — Enterprise**: billing, notifications over SQS, audit log, analytics, Redis
   caching.
 - **Phase 6 — Production**: AWS deployment, monitoring, autoscaling, security hardening,

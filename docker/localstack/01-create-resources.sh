@@ -13,9 +13,9 @@ awslocal s3api create-bucket \
   --region "${REGION}" \
   --create-bucket-configuration LocationConstraint="${REGION}" >/dev/null
 
-# Case documents are versioned in S3 as well as in the metadata table: the version
-# history in the database is what users browse, object versions are the safety net
-# against an overwrite or a bad delete.
+# Object versioning is the safety net against an overwrite or a bad delete. Note that
+# the platform exposes no document version history of its own — Phase 4 stores one
+# current object per document — so this is an operator's recovery tool, not a feature.
 awslocal s3api put-bucket-versioning \
   --bucket "${BUCKET}" \
   --versioning-configuration Status=Enabled

@@ -31,5 +31,10 @@ public enum CaseEventType {
     TASK_CANCELLED,
     DEADLINE_CREATED,
     DEADLINE_COMPLETED,
-    DEADLINE_CANCELLED
+    DEADLINE_CANCELLED,
+
+    // ------------------------------------------------------- Phase 4: what was filed
+    /** Written when storage confirms the upload, not when the link is issued. */
+    DOCUMENT_UPLOADED,
+    DOCUMENT_DELETED
 }

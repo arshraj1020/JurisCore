@@ -98,7 +98,8 @@ public abstract class AbstractIntegrationTest {
                                case_management.hearings,
                                case_management.tasks,
                                case_management.deadlines,
-                               case_management.reminders
+                               case_management.reminders,
+                               documents.case_documents
                 CASCADE
                 """);
     }

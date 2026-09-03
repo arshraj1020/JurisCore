@@ -210,6 +210,121 @@ recorded intent for that consumer to read. This is said on the enum, on the colu
 response schema and in the API description, because a status called SENT is exactly the
 sort of thing a later reader takes at face value.
 
+## 5b. Phase 4: documents and object storage
+
+A fifth module, `juriscore-documents`, owning the `documents` schema. One dependency edge,
+to `juriscore-casework`, because a document is a document *on a matter*.
+
+**No bytes in PostgreSQL, and none through the application.** A `bytea` column holding
+filings would put the whole corpus into every backup, replica and dump; proxying uploads
+through the JVM would put every file through the heap and make the app the bottleneck in
+front of something that scales perfectly well without it. So the flow is presigned: the
+platform authorizes, issues a signed URL, and the browser talks to S3 directly.
+
+### The seam
+
+`ObjectStorageService` is a port in `juriscore-common`, alongside `EventPublisher` and for
+the same reason. It lives there rather than in the documents module because the SDK clients
+and their credentials are configured in `juriscore-app`, and a module cannot depend on the
+application that assembles it. Two adapters sit beside `AwsConfig`:
+
+- `S3ObjectStorageService` — the real one, active when `juriscore.aws.enabled=true`.
+- `InMemoryObjectStorageService` — active when it is false. Stores no bytes, returns inert
+  URLs, reports `isDurable() == false` and warns loudly at startup. It exists so the suite
+  and a fresh checkout run with no AWS credentials and no network, while the document rules
+  themselves are exercised for real.
+
+Nothing in `juriscore-documents` imports an AWS type. That is what makes the whole rule set
+unit-testable without a cloud account.
+
+### Upload, in two halves
+
+The application never sees the file, so it learns about an upload twice:
+
+1. **Register.** Validate the case, the filename, the content type and the size; write an
+   `UPLOADING` row; derive the object key; issue a signed PUT. Nothing is downloadable yet.
+2. **Complete.** Read the object back from storage. If it is not there, the document is not
+   complete — the client's word is not evidence. If it is, its **actual** size replaces the
+   declared one and the document becomes `AVAILABLE`.
+
+Completing twice is a no-op: no second transition, no second event, no second timeline
+entry. That matters because a retry, a double-click and a client replaying after a timeout
+all look the same from here.
+
+### What a presigned PUT actually enforces
+
+Worth stating precisely, because the guarantee is narrower than it looks. The signature
+covers the **object key** and the **HTTP method**, so a link cannot be redirected to another
+key or reused to GET or DELETE — that is what keeps one firm's upload URL from ever writing
+into another firm's prefix. `Content-Type` is signed too. **Size is not.** A client that
+ignores `Content-Length` can push a larger object. That gap is closed at completion, where
+the real size is read back and anything over the maximum moves the document to `FAILED`; in
+a deployed environment a bucket policy is the belt to that braces.
+
+### Object keys
+
+`organizations/{organizationId}/cases/{caseId}/documents/{documentId}` — every segment a
+UUID the platform generated. No filename, no description, no header value; nothing a user
+typed. Traversal and cross-tenant collision are not filtered out, they are unrepresentable,
+because a UUID cannot contain a slash. The tenant prefix leads so a future least-privilege
+IAM split is a policy document rather than a migration. The key is never returned by the
+API.
+
+The last segment is the generated id, which is why registration writes twice inside one
+transaction: the row is inserted with a unique reservation value and stamped with its real
+key immediately after. Neither shortcut works. An id assigned before the insert is rejected
+outright — `@GeneratedValue` treats a non-null id as a detached entity — and a key set on
+the entity between `persist` and `flush` is not folded into the INSERT. The column is
+therefore *not* mapped `updatable = false`: Hibernate excludes a non-updatable column from
+dirty checking entirely, so that mapping silently discarded the stamping statement and
+every row kept its reservation. What actually keeps a caller from influencing the key is
+that `UpdateDocumentRequest` has no field for it, `update` never writes it, and
+`uk_case_documents_storage_key` would reject a collision. `StorageKeys.requireCanonical`
+guards the one path that matters: no link is ever signed for anything but a stamped key.
+
+The in-memory adapter issues an **opaque handle**, resolved internally, rather than the key
+spelt into a URL. A link is the one artefact a client is handed, so a stand-in that pasted
+the key into it would publish through the link exactly what `DocumentResponse` withholds.
+
+### `FAILED` has to outlive the error that reports it
+
+Rejecting an oversized or empty object ends in an error response, and `ApiException` is a
+`RuntimeException` — so the throw marks the transaction rollback-only and discards the
+`FAILED` transition that was the entire point of the check. `DocumentFailureRecorder`
+commits it in a `REQUIRES_NEW` transaction first, exactly as `LoginAttemptRecorder` does for
+the sign-in counter it sits behind. This is the same trap twice in one codebase, and both
+times it was invisible to a unit test: a mocked repository has no transaction to roll back,
+so the entity in hand says `FAILED` while the row never left `UPLOADING`.
+
+### Deletion is not atomic, and does not pretend to be
+
+PostgreSQL and S3 share no transaction, so one order has to be chosen and its failure mode
+accepted. Metadata commits first; the object is removed afterwards by
+`DeletedDocumentObjectCleaner`, an `AFTER_COMMIT` listener. The failure that leaves is an
+orphaned object costing storage — cleaned up by a bucket lifecycle rule. The alternative
+order would leave active metadata pointing at a file that is gone, which is the failure a
+user would actually experience. A storage failure during cleanup is logged and swallowed:
+the user's delete already succeeded.
+
+### File validation, and its limits
+
+Server-side, before any link is issued: filename required, no path separator, no `..`, no
+control characters, length bounded; content type on an **allowlist**; size positive and
+under the maximum.
+
+**There is no malware scanning and no content inspection.** The platform has no scanning
+infrastructure and Phase 4 adds none, so a file declared `application/pdf` that is really
+something else will be accepted as one. Saying so is better than a check that looks like one
+and is not. What is real: the allowlist, the size ceiling, that nothing is ever served from
+a public URL, and that downloads go out as `Content-Disposition: attachment` rather than
+being rendered.
+
+### Presigned URLs are credentials
+
+Bounded expiry (15 minutes up, 5 down), issued only after authorization, for one key and
+one method. They are never logged, never stored, and never carried on a domain event —
+`document.download_requested` records *who* asked and for *what*, not the link they got.
+
 ## 6. What Phase 1 deliberately leaves out
 
 - **API gateway.** One deployable needs no gateway. The ALB terminates TLS and routes; a

@@ -47,7 +47,7 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-    schemas: organization,identity,casework,case_management
+    schemas: organization,identity,casework,case_management,documents
     default-schema: public
     validate-on-migrate: true
     # Never on: an out-of-order migration in production hides a real drift problem.
@@ -202,6 +202,29 @@ juriscore:
     document-bucket: ${JURISCORE_S3_BUCKET:juriscore-documents}
     notification-queue: ${JURISCORE_SQS_NOTIFICATIONS:juriscore-notifications}
     audit-queue: ${JURISCORE_SQS_AUDIT:juriscore-audit}
+    # Presigned links are bearer credentials for one object. Keep the window small.
+    upload-url-expiry: ${JURISCORE_S3_UPLOAD_URL_EXPIRY:15m}
+    download-url-expiry: ${JURISCORE_S3_DOWNLOAD_URL_EXPIRY:5m}
+
+  documents:
+    # Refused above this, both when the upload is requested and again against the size
+    # storage reports at completion — a caller under-declaring cannot get past the second.
+    max-file-size: ${JURISCORE_DOC_MAX_SIZE:52428800}
+    max-filename-length: 255
+    # An allowlist, not a blocklist. Anything not named here is refused, which is the only
+    # way round the fact that a filename extension is a claim, not evidence.
+    allowed-content-types:
+      - application/pdf
+      - application/msword
+      - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+      - application/vnd.ms-excel
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      - application/rtf
+      - text/plain
+      - text/csv
+      - image/jpeg
+      - image/png
+      - image/tiff
 
 logging:
   pattern:

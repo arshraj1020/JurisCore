@@ -4,6 +4,8 @@ import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.Duration;
+
 /**
  * AWS wiring, bound from {@code juriscore.aws.*}.
  *
@@ -35,4 +37,17 @@ public class AwsProperties {
     private String notificationQueue = "juriscore-notifications";
 
     private String auditQueue = "juriscore-audit";
+
+    /**
+     * How long an upload link stays valid.
+     *
+     * <p>Short on purpose. A presigned URL is a bearer credential for one object, so the
+     * window is the blast radius if it leaks through a browser history, a proxy log or a
+     * screenshot. Fifteen minutes is long enough to pick a file and push it over a poor
+     * connection, and short enough that a leaked link is usually already dead.
+     */
+    private Duration uploadUrlExpiry = Duration.ofMinutes(15);
+
+    /** Shorter still: a download link is clicked immediately or not at all. */
+    private Duration downloadUrlExpiry = Duration.ofMinutes(5);
 }
