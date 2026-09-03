@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.juriscore</groupId>
+        <artifactId>juriscore-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>juriscore-casework</artifactId>
+    <name>JurisCore :: Casework</name>
+    <description>Clients, cases, lawyer assignments and the case timeline.</description>
+
+    <dependencies>
+        <!--
+            Casework depends on identity for one reason: assigning a lawyer means asserting
+            that a user id is an ACTIVE LAWYER in the *same* organization, and that fact
+            lives in identity's schema. There are no cross-schema joins, so the answer has
+            to come from identity's service API — which is exactly the rule ARCHITECTURE.md
+            states ("a module never injects another module's repositories, only its service
+            API"). The dependency is confined to IdentityLawyerDirectory; nothing else in
+            this module imports an identity type.
+
+            juriscore-organization and juriscore-common arrive transitively, as they do for
+            identity itself.
+        -->
+        <dependency>
+            <groupId>com.juriscore</groupId>
+            <artifactId>juriscore-identity</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

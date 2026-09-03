@@ -81,7 +81,20 @@ public abstract class AbstractIntegrationTest {
 
     @BeforeEach
     void resetDatabase() {
-        // CASCADE follows the FKs from users into the token tables.
-        jdbcTemplate.execute("TRUNCATE TABLE identity.users, organization.organizations CASCADE");
+        // CASCADE follows the FKs from users into the token tables, and from clients into
+        // cases, assignments and timeline entries. It does not reach across schemas —
+        // casework deliberately has no foreign key into identity or organization — so the
+        // casework tables have to be named here explicitly. Leaving them out would let one
+        // test's matters be counted by the next one's list assertions.
+        jdbcTemplate.execute("""
+                TRUNCATE TABLE identity.users,
+                               organization.organizations,
+                               casework.clients,
+                               casework.cases,
+                               casework.case_assignments,
+                               casework.case_events,
+                               casework.case_number_sequences
+                CASCADE
+                """);
     }
 }

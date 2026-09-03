@@ -23,6 +23,7 @@
         <module>juriscore-common</module>
         <module>juriscore-organization</module>
         <module>juriscore-identity</module>
+        <module>juriscore-casework</module>
         <module>juriscore-app</module>
     </modules>
 
@@ -124,6 +125,11 @@
             <dependency>
                 <groupId>com.juriscore</groupId>
                 <artifactId>juriscore-identity</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.juriscore</groupId>
+                <artifactId>juriscore-casework</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>
