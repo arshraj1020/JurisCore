@@ -325,6 +325,206 @@ Bounded expiry (15 minutes up, 5 down), issued only after authorization, for one
 one method. They are never logged, never stored, and never carried on a domain event —
 `document.download_requested` records *who* asked and for *what*, not the link they got.
 
+## 5c. Phase 5: billing, notifications and audit
+
+Three more modules on three more schemas, following the rule the first six set: one module,
+one schema, no foreign key across a boundary, and anything pointing at another module's row
+is a plain UUID validated through that module's service API.
+
+- **`juriscore-billing`** (`billing`) — one edge, to casework, because an invoice is a bill
+  to a *client* usually for work on a *matter*. It reaches both through `ClientService` and
+  `CaseAccess`, never through casework's repositories.
+- **`juriscore-notifications`** (`notifications`) — depends on `juriscore-common` alone. It
+  knows how to deliver a message to a user id and nothing about what a user or an invoice
+  is.
+- **`juriscore-audit`** (`audit`) — likewise depends on common alone.
+
+The two obvious objections to that last pair are worth answering. Something has to know
+which user ids should hear about an invoice, and something has to know what every module's
+events mean. Both of those live in `juriscore-app` — `FirmStaffDirectory`,
+`BillingNotificationListener`, `DomainEventAuditListener` — which is the module that already
+has every module in view because it is the one that assembles them. The alternative for
+audit was an `Auditable` interface in `juriscore-common` that every Phase 1–4 event
+implements; that would mean editing more than twenty working event classes to install a
+Phase 5 concern into them, and scattering the decision about what gets audited across four
+modules. Here the whole policy is one switch that reads top to bottom.
+
+### Money
+
+`BigDecimal` in Java, `NUMERIC` in PostgreSQL, and `double` nowhere. The rounding rule is in
+one file, `Money`, and applies **twice per line and nowhere else**:
+
+1. `amount = round(quantity × unitPrice)` — quantity carries three decimals, so the product
+   genuinely needs rounding.
+2. `taxAmount = round(amount × taxRate ÷ 100)` — computed from the *already rounded* line
+   amount, so what a reader can verify with a calculator from the printed figures is what
+   the system stored.
+
+Scale 2, `HALF_UP`. `HALF_EVEN` is better over long statistical runs and worse here: a firm
+explaining why 2.125 became 2.12 on one line and 2.14 on another is a conversation that
+should not have to happen.
+
+Everything above a line is a sum of values already at scale 2, and adding exact two-decimal
+figures needs no rounding — so `total = subtotal + tax − discount` holds as an *identity*
+rather than approximately. That is what lets `ck_invoices_total` assert it in the database
+rather than trust the application. One consequence worth stating: tax is computed per line
+and then summed, not computed once on the subtotal. On a 200-line invoice those differ by
+₹0.36, and the per-line figure is the one printed beside each line.
+
+No request DTO has a `subtotal`, `taxAmount` or `totalAmount` field. A client cannot
+over-declare a total, not because the server checks their figure but because it never asks
+for one.
+
+### Invoice numbering
+
+`INV-2026-000001`, per firm, per year — the same three statements `CaseNumberGenerator`
+uses, deliberately, because the problem is identical and a second cleverer solution to it
+would be a second thing to be wrong. `INSERT … ON CONFLICT DO NOTHING`, then
+`SELECT … FOR UPDATE`, then `UPDATE`. `uk_invoices_number` is the final arbiter. A
+rolled-back creation releases the counter with it, so a firm's numbering has no gap to
+explain.
+
+### Invoice lifecycle
+
+```
+DRAFT          -> ISSUED, CANCELLED
+ISSUED         -> PARTIALLY_PAID, PAID, OVERDUE, CANCELLED
+PARTIALLY_PAID -> PAID, OVERDUE, CANCELLED
+OVERDUE        -> PARTIALLY_PAID, PAID, CANCELLED
+PAID, CANCELLED -> (terminal)
+```
+
+Issuing is a one-way door. A DRAFT is a working document; the moment it is issued it has
+been sent to somebody, and its figures, its client and its matter are frozen. An edit
+touching any of them afterwards is a **409, not a silent no-op** — a bookkeeper who thinks
+they corrected an issued invoice must not be left believing it. Only the notes stay
+editable.
+
+`PAID` and `CANCELLED` have no outgoing edges. Unwinding either is a credit note, and Phase
+5 does not have one; quietly allowing `PAID -> ISSUED` would let a PATCH rewrite settled
+history, which is precisely what an audit trail exists to make impossible.
+
+### Why payments take a row lock
+
+Two bookkeepers recording payments on the same invoice at the same moment is not a rare
+case, and the naive version gets it wrong in a way that costs money: both read "nothing paid
+yet", both find their 6,000 acceptable against a 10,000 invoice, both insert, and the
+invoice is overpaid — with the second request reporting success.
+
+Optimistic locking does not fix it. The version column would object only because both
+transactions happen to write the invoice row, and the bookkeeper whose perfectly valid
+payment lost the race gets a 409 telling them to reload. So `PaymentService` takes the
+invoice under `PESSIMISTIC_WRITE` *before* reading the balance. The second caller waits for
+the first to commit and then reads the truth: an overpayment is refused because it is an
+overpayment, and a valid concurrent payment succeeds because it is valid. Only ever one row
+is locked, and always the one being paid, so there is no deadlock to arrange.
+
+A payment row is immutable — every column `updatable = false`, and no service exposes an
+edit. Correcting one means recording the correction, not rewriting the claim.
+
+### Overdue processing
+
+`OVERDUE` is the one invoice state nobody causes: every other transition has a request
+behind it, this one is caused by time passing. Deriving it on read was rejected — a derived
+status cannot be the subject of an event, so nobody could be told, and it would leave the
+stored status disagreeing with the API's.
+
+So there is a sweep, reusing Phase 3's scheduling architecture rather than adding one.
+`OverdueInvoiceClaimer` uses `FOR UPDATE SKIP LOCKED`, exactly as `ReminderClaimer` does, so
+several application instances take disjoint batches by construction. **Idempotence comes
+from the predicate, not from a flag:** the claim matches only `ISSUED` and `PARTIALLY_PAID`,
+so a rerun finds those invoices already `OVERDUE` and publishes nothing. No "last swept at"
+column is needed and none exists.
+
+An invoice due *today* is not late today — a firm that gives a client until the 30th means
+the whole of the 30th.
+
+### Notifications
+
+In-app only. Nothing sends an email, an SMS, a WhatsApp message or a push, and the table has
+no column that would carry one: no delivery status, no provider message id, no retry count.
+A status called `SENT` on a row nothing has ever sent is exactly the sort of thing a later
+reader believes.
+
+Mapping is explicit and short — five events out of the twenty-odd the platform publishes.
+A notification for every event is a feed nobody reads, which is worse than no feed.
+
+Three things suppress a notification: the recipient turned the category off; the same
+`dedupe_key` already exists for that recipient; or there is no recipient. The dedupe key is
+derived from the *business fact* (`invoice.overdue:{id}`), not from the delivery, so a
+repeated sweep, a retried publish or a second application instance all collide on
+`uk_notifications_dedupe`. The application-side check catches the ordinary case cheaply and
+the unique index catches the race, because two instances handling the same event will both
+pass the check.
+
+`action_path` is a relative in-app path and the database enforces that it starts with `/`.
+Never an absolute URL and never a signed one: a presigned link is a bearer credential, and a
+row that sits in somebody's inbox indefinitely is the last place to keep one.
+
+Preferences belong to the **user**, not the firm. There is no endpoint taking another user's
+id, so "mute a colleague" is not a request that can be expressed rather than one that is
+refused. A user with no row has everything enabled.
+
+### Audit, and what append-only actually means here
+
+Enforced at four levels, because a convention is not an enforcement:
+
+1. **Shape.** `AuditEvent` does not extend `BaseEntity` — no `version`, no `updated_at`, no
+   `updated_by`. A table with an optimistic-lock column is a table somebody expects to
+   rewrite; the absence is the statement.
+2. **Mapping.** Every column is `updatable = false`.
+3. **Repository.** `AuditEventRepository` extends Spring Data's bare `Repository` marker
+   plus the read-only `JpaSpecificationExecutor`, and declares exactly one write. Extending
+   `JpaRepository` would have inherited six ways to mutate the trail, sitting on the
+   interface for anyone reaching for autocomplete.
+4. **API.** `AuditController` maps GET and nothing else. There is no PUT, PATCH or DELETE to
+   authorize.
+
+`organization_id` and `actor_user_id` are both nullable, for the two cases that genuinely
+have neither: a failed sign-in against an address matching no account, and the scheduled
+sweeps that act with no signed-in user. The actor is read from `CurrentUser` rather than
+carried on every event — an `AFTER_COMMIT` listener runs synchronously on the request
+thread, so the security context is intact. **Moving that listener to `@Async` would silently
+drop the context and attribute every row to nobody**, which is a failure that looks like
+working software. It replaces `EventLogListener`, the Phase 1 placeholder that logged every
+event and was `@Async` precisely because it needed no context.
+
+`AuditTrail` writes in a `REQUIRES_NEW` transaction and swallows failures at ERROR. That is
+a real trade: a lost audit row is a genuine loss, and it is the right call for an in-process
+trail, because an invoice that was legitimately issued must not be reported as failed
+because the record of it could not be written. A system that must not lose a single audit row
+writes it inside the business transaction and pays for that with an audit table that can
+roll back a payment.
+
+`AuditRedaction` refuses any summary that looks like it carries a credential, a signed URL
+or a card-shaped number. It **fails loudly rather than scrubbing**: a tripped rule is a bug
+in whatever built the summary, and replacing the offending substring would hide that bug
+while still recording a row nobody can trust. Producers already keep secrets off their
+events — `PaymentRecordedEvent` carries no reference, and the two identity events that do
+carry tokens are audited without them — so this is a belt to those braces.
+
+Reading the trail is `FIRM_ADMIN` only. It records who did what, which makes it a record
+about a firm's own staff: a clerk should not be able to page through what a partner has been
+doing. `SUPER_ADMIN` gets nothing either — it has no organization, so
+`requireOrganizationId()` refuses it before any handler body runs. Operating the platform is
+a different problem from investigating a tenant, and the second deserves a better answer
+than "the support engineer had a token".
+
+### What Phase 5 is not
+
+No payment gateway or processing of any kind; no card, bank or gateway credential stored
+anywhere. No GST engine — a rate and an amount per line, and no claim of statutory
+compliance. No accounting export. No email, SMS, WhatsApp or push. No SQS or Kafka: the bus
+is still in-process, and the `notification-queue`/`audit-queue` settings remain unused
+placeholders. No client billing portal. No credit notes or refunds. No currency conversion.
+No analytics and no Redis caching.
+
+Two audit gaps are worth naming rather than papering over: **sign-in success and failure,
+logout and session revocation are not audited**, because Phase 1 publishes no events for
+them — `AuthService` records failures directly on the user row through
+`LoginAttemptRecorder`. Adding events to working authentication code for a Phase 5 concern
+was left for a follow-up rather than faked here.
+
 ## 6. What Phase 1 deliberately leaves out
 
 - **API gateway.** One deployable needs no gateway. The ALB terminates TLS and routes; a
@@ -351,8 +551,10 @@ Honest list, for the next session. Everything here is a deliberate Phase 1 bound
 an oversight:
 
 - **No email delivery.** Invitation and reset tokens are published on domain events and go
-  nowhere else. Integration tests read them off the event bus. Until Phase 5 wires SES,
-  the invitation flow cannot complete for a real user.
+  nowhere else. Integration tests read them off the event bus, and the invitation flow
+  still cannot complete for a real user. Phase 5 did *not* close this: it added an in-app
+  notification feed, which is a different thing, and deliberately added no SES, SMS or
+  push client.
 - **`TenantGuard` is not on any request path.** Built and unit-tested; nothing calls it
   until Phase 2 introduces the first `TenantAwareEntity`. See §2.
 - **No scheduled cleanup** of expired refresh and reset tokens. The repository methods
@@ -368,6 +570,22 @@ an oversight:
 - **Search is `LIKE '%term%'`** on name and email. The leading wildcard means no index can
   serve it; the `organization_id` predicate bounds the scan to one firm, which is fine at
   Phase 2–3 volumes. The PRD's Elasticsearch is the eventual answer.
+- **Sign-in, logout and session revocation are not audited.** Phase 5 built the trail and
+  wired every module's events into it, but authentication publishes no events for these:
+  `AuthService` records failures directly on the user row through `LoginAttemptRecorder`.
+  Adding events to working authentication code for a Phase 5 concern was left for a
+  follow-up rather than faked with a listener that had nothing to listen to. This is the
+  largest remaining hole in the trail and should be the first thing Phase 6 closes.
+- **The event bus is still in-process.** `SpringEventPublisher` and `AFTER_COMMIT`
+  listeners, exactly as Phase 1 shipped. The `notification-queue` and `audit-queue`
+  settings in `application.yml` are placeholders that nothing reads. Swapping in an SQS
+  publisher remains a one-bean change, which was the point of the port — but it has not
+  been made.
+- **Notification delivery is in-app only.** No email, SMS, WhatsApp or push, and no
+  scheduled digest. A notification exists only where somebody signs in and reads it.
+- **No credit notes.** Correcting an issued invoice means cancelling it and raising
+  another, which loses the link between the two. A firm reconciling its books has to make
+  that connection by hand.
 - **The image build compiles the application a second time.** CI builds and tests with
   Maven, then the Docker build compiles again from source rather than consuming the jar
   the previous job produced. Correct, just slower; worth collapsing when CI time starts to

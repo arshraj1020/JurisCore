@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.juriscore</groupId>
+        <artifactId>juriscore-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>juriscore-audit</artifactId>
+    <name>JurisCore :: Audit</name>
+    <description>An append-only record of what happened, and the query API over it.</description>
+
+    <dependencies>
+        <!--
+            Common only, for the same reason notifications takes nothing else: this module
+            stores an action, an entity type and a sentence, and has no opinion about what
+            any of them mean. The bridge that knows every module's events is
+            DomainEventAuditListener, in juriscore-app.
+
+            That boundary is also what keeps the trail honest. A module that imported
+            casework, billing and documents in order to describe their events would be a
+            module with a reason to reach into them; this one has none.
+        -->
+        <dependency>
+            <groupId>com.juriscore</groupId>
+            <artifactId>juriscore-common</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

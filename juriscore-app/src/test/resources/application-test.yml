@@ -29,6 +29,12 @@ juriscore:
   # credentials, LocalStack, or a network.
   aws:
     enabled: false
+  # The overdue sweep is driven directly by OverdueInvoiceIT rather than by the timer, for
+  # the same reason the reminder sweep is: a background thread mutating invoice rows while
+  # a test asserts on them is the classic test that is green locally and red on a busy
+  # runner.
+  billing:
+    overdue-sweep-enabled: false
 
 logging:
   level:

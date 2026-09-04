@@ -26,6 +26,9 @@
         <module>juriscore-casework</module>
         <module>juriscore-case-management</module>
         <module>juriscore-documents</module>
+        <module>juriscore-billing</module>
+        <module>juriscore-notifications</module>
+        <module>juriscore-audit</module>
         <module>juriscore-app</module>
     </modules>
 
@@ -142,6 +145,21 @@
             <dependency>
                 <groupId>com.juriscore</groupId>
                 <artifactId>juriscore-documents</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.juriscore</groupId>
+                <artifactId>juriscore-billing</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.juriscore</groupId>
+                <artifactId>juriscore-notifications</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.juriscore</groupId>
+                <artifactId>juriscore-audit</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

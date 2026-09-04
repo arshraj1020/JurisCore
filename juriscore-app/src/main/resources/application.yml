@@ -47,7 +47,7 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-    schemas: organization,identity,casework,case_management,documents
+    schemas: organization,identity,casework,case_management,documents,billing,notifications,audit
     default-schema: public
     validate-on-migrate: true
     # Never on: an out-of-order migration in production hides a real drift problem.
@@ -225,6 +225,19 @@ juriscore:
       - image/jpeg
       - image/png
       - image/tiff
+
+  billing:
+    # OVERDUE is the one invoice state nobody causes: it is caused by time passing, so
+    # something has to notice. The sweep reuses Phase 3's scheduling architecture rather
+    # than adding one — see OverdueInvoiceScheduler.
+    overdue-sweep-enabled: ${JURISCORE_OVERDUE_SWEEP:true}
+    # Hourly, not by the minute. An invoice becomes late once, at midnight, and nothing is
+    # improved by noticing within sixty seconds.
+    overdue-poll-interval: ${JURISCORE_OVERDUE_POLL:PT1H}
+    # Bounded so one sweep cannot hold a transaction open over a firm's entire ledger.
+    # Anything left over is picked up by the next run; the claim is FOR UPDATE SKIP LOCKED,
+    # so a second instance takes a disjoint batch rather than waiting.
+    overdue-batch-size: ${JURISCORE_OVERDUE_BATCH:100}
 
 logging:
   pattern:

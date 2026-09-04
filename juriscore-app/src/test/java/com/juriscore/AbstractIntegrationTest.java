@@ -99,7 +99,15 @@ public abstract class AbstractIntegrationTest {
                                case_management.tasks,
                                case_management.deadlines,
                                case_management.reminders,
-                               documents.case_documents
+                               documents.case_documents,
+                               billing.billing_profiles,
+                               billing.invoice_number_sequences,
+                               billing.invoices,
+                               billing.invoice_line_items,
+                               billing.payments,
+                               notifications.notifications,
+                               notifications.notification_preferences,
+                               audit.audit_events
                 CASCADE
                 """);
     }

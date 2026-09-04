@@ -39,6 +39,18 @@
             <groupId>com.juriscore</groupId>
             <artifactId>juriscore-documents</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.juriscore</groupId>
+            <artifactId>juriscore-billing</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.juriscore</groupId>
+            <artifactId>juriscore-notifications</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.juriscore</groupId>
+            <artifactId>juriscore-audit</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

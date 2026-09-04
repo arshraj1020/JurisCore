@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.juriscore</groupId>
+        <artifactId>juriscore-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>juriscore-notifications</artifactId>
+    <name>JurisCore :: Notifications</name>
+    <description>In-app notifications and the per-user switches that gate them.</description>
+
+    <dependencies>
+        <!--
+            Common only, and that is the design rather than an accident. This module knows
+            how to deliver a message to a user id; it does not know what a user is, what a
+            case is or what an invoice is. Deciding *which* user ids should hear about
+            something needs identity and billing in view, so that decision lives in
+            juriscore-app (FirmStaffDirectory, BillingNotificationListener) — the module
+            that already has every module in view because it assembles them.
+
+            The result is that every rule in here — preferences, deduplication, per-user
+            isolation — is unit-testable without standing up identity or billing.
+
+            Also notably absent: any email, SMS, WhatsApp or push client. Phase 5 delivers
+            notifications in-app and nowhere else, and there is no dependency here
+            suggesting otherwise.
+        -->
+        <dependency>
+            <groupId>com.juriscore</groupId>
+            <artifactId>juriscore-common</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

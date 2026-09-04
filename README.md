@@ -22,11 +22,14 @@ see [Roadmap](#roadmap).
 | Uniform response envelope and error catalogue | Done |
 | Flyway migrations, schema-per-module | Done |
 | Docker Compose stack: PostgreSQL, Redis, LocalStack (S3 + SQS) | Done |
-| Domain events with commit-ordered delivery | Done (in-process; SQS in Phase 5) |
+| Domain events with commit-ordered delivery | Done (in-process; SQS not implemented) |
 | OpenAPI / Swagger UI | Done |
 | Unit tests and Testcontainers integration tests | Done |
 | GitHub Actions CI with image build and vulnerability scan | Done |
-| Clients, cases, hearings, tasks, documents, billing, audit | Phases 2–5 |
+| Clients, cases, hearings, tasks, documents | Done (Phases 2–4) |
+| Invoices, line items, recorded payments, overdue sweep | Done (Phase 5) |
+| In-app notifications and per-user category preferences | Done (Phase 5) |
+| Append-only audit trail with a firm-admin query API | Done (Phase 5) |
 
 ## Verification status
 
@@ -280,8 +283,39 @@ Phases follow the PRD.
   OCR, previews, full-text search, document version history, external sharing, and any
   client-facing access — a client of a firm still cannot reach its documents, because the
   explicit sharing mechanism that would allow it does not exist.
-- **Phase 5 — Enterprise**: billing, notifications over SQS, audit log, analytics, Redis
-  caching.
+- **Phase 5 — Billing, notifications and audit** *(this release)*: invoices with
+  server-calculated money, recorded payments, an in-app notification feed with per-user
+  category switches, and an append-only audit trail. Three new modules —
+  `juriscore-billing`, `juriscore-notifications`, `juriscore-audit` — on three new schemas.
+
+  **What Phase 5 is not**, stated plainly because several of these are one word away from
+  what it does:
+
+  - **No payment gateway, and no payment processing of any kind.** JurisCore *records*
+    that money arrived; it never moves any. There is no Stripe, no Razorpay, no card
+    network, no UPI handle and no bank connection. `PaymentMethod.CARD` is a label a person
+    picked from a list, not a charge. No card number, CVV, bank credential or gateway
+    secret is stored anywhere — there is no column that could hold one.
+  - **No GST engine.** Invoices carry a tax rate and a tax amount per line, and that is the
+    whole of it: no CGST/SGST/IGST split, no place-of-supply derivation, no reverse charge,
+    no HSN/SAC codes, no return filing. A firm records the tax it has already worked out.
+    Nothing here is a claim of statutory compliance.
+  - **No accounting integration.** Nothing exports to Tally, Zoho Books or anything else.
+  - **No email, SMS, WhatsApp or push.** Notifications are in-app rows read through the
+    API, and that is the only delivery channel that exists. There is no delivery status
+    column, no provider message id and no retry count — because nothing is sent.
+  - **No SQS or Kafka.** The event bus is still in-process, exactly as in Phase 1. The
+    `notification-queue` and `audit-queue` settings in `application.yml` remain unused
+    placeholders.
+  - **No client billing portal.** A `CLIENT` user reaches no billing endpoint. An invoice
+    references a client because it is a firm-side record *about* them, not a document
+    shared *with* them.
+  - **No credit notes and no refunds.** Correcting an issued invoice means cancelling it
+    and raising another. Half a credit-note subsystem would be worse than none.
+  - **No currency conversion.** Every invoice and payment stores its currency and a payment
+    in a different one is refused rather than converted. There is no FX rate anywhere.
+  - **No analytics and no Redis caching**, both of which earlier notes filed under
+    "Phase 5". Neither is implemented.
 - **Phase 6 — Production**: AWS deployment, monitoring, autoscaling, security hardening,
   load testing.
 
