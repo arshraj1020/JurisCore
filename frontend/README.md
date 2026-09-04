@@ -11,10 +11,20 @@ npm install
 npm run dev      # http://localhost:3000
 ```
 
-The dev server is pinned to port 3000 (`strictPort`). That is not cosmetic: the backend's
-default CORS allow-list is `http://localhost:3000`, so the frontend works against a stock
-backend without widening CORS for convenience. Start the API separately (`mvn spring-boot:run`
-in `juriscore-app`, or the Docker Compose stack) and sign in.
+Start the API separately first — `mvn spring-boot:run` in `juriscore-app`, or the Docker
+Compose stack — then the dev server. The app calls the API with relative paths and Vite
+proxies `/api` (plus `/actuator` and the OpenAPI paths) to `http://localhost:8080`, so
+requests are same-origin and CORS is not involved at all. Point the proxy elsewhere with
+`VITE_API_PROXY_TARGET=http://localhost:9090 npm run dev`.
+
+Without that proxy the browser sends `/api/v1/...` to Vite, which answers 404 with an
+empty body — and a 404 is indistinguishable from a missing record at the fetch layer, so
+the form reports "That record does not exist." while the backend sits idle.
+`src/test/devProxy.test.ts` exists to stop that returning.
+
+The port is pinned to 3000 (`strictPort`) so that a browser reaching the backend directly
+— which is what a deployed frontend does — matches the backend's default CORS allow-list,
+`http://localhost:3000`.
 
 | Script | What it does |
 |---|---|
@@ -119,7 +129,7 @@ screen. That keyboard model is why `Tabs` is a component rather than a row of bu
 
 ## Tests
 
-80 tests across twelve files, run with `npm test`. They cover the things that are actually
+88 tests across fourteen files, run with `npm test`. They cover the things that are actually
 easy to get wrong: exact decimal arithmetic and HALF_UP rounding, the refresh single-flight
 under a burst of parallel 401s, the presigned upload contract including the absent
 Authorization header and the expired-link retry, lifecycle and role gating on the invoice

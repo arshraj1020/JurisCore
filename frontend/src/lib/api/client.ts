@@ -13,8 +13,16 @@ import {
  */
 
 /**
- * Empty in development, where Vite serves the app on the origin the backend's CORS
- * allow-list already names. Set `VITE_API_BASE_URL` for a deployed frontend.
+ * Empty by default, so every request is a *relative* path and goes to whatever origin
+ * served the page.
+ *
+ * That is what a deployment behind a reverse proxy wants, and in development it is the
+ * Vite dev server's `/api` proxy (see `vite.config.ts`) that forwards those paths to
+ * Spring Boot. Empty here therefore means "someone in front of me routes /api", not "the
+ * backend is on this origin" — with neither a proxy nor this variable set, `/api/...`
+ * reaches the dev server, which answers 404.
+ *
+ * Set `VITE_API_BASE_URL` for a frontend deployed on a different origin from the API.
  */
 const BASE_URL = (import.meta.env['VITE_API_BASE_URL'] ?? '').replace(/\/$/, '');
 

@@ -133,10 +133,16 @@ npm install
 npm run dev
 ```
 
-<http://localhost:3000>. The port is pinned deliberately: the backend's default CORS
-allow-list is `http://localhost:3000`, so the dev server matches it rather than the
-allow-list being widened to match Vite's default. Register a firm from the sign-in page, or
-sign in with an account you created through the API.
+<http://localhost:3000>. **Start the API first** — the dev server proxies `/api` to
+`http://localhost:8080`, so the browser's requests are same-origin and CORS is not
+involved. If the backend is not up, or is on another port, every call returns a dev-server
+404 and the interface reports it as a missing record; point the proxy with
+`VITE_API_PROXY_TARGET=http://localhost:9090 npm run dev`.
+
+The port is pinned to 3000 deliberately: the backend's default CORS allow-list is
+`http://localhost:3000`, which is what a *deployed* frontend calling the API directly
+needs. Register a firm from the sign-in page, or sign in with an account you created
+through the API.
 
 `npm run verify` in `frontend/` runs typecheck, lint, tests and a production build — the
 gate the frontend has to pass. See [frontend/README.md](frontend/README.md).
@@ -285,7 +291,7 @@ Two of these encode bugs that were found and fixed during verification, so they 
 regression tests rather than decoration: `SecurityGuaranteesIT.resetLinkIsSingleUse` and
 `RateLimitIT.repairsAnImmortalCounter`.
 
-The web client has 65 tests over nine files, aimed at what is actually easy to get wrong
+The web client has 88 tests over fourteen files, aimed at what is actually easy to get wrong
 rather than at a coverage number: exact decimal arithmetic and HALF_UP rounding; the token
 refresh single-flight under a burst of six parallel 401s; the presigned upload contract,
 including the absent `Authorization` header on the storage request and the expired-link
