@@ -12,13 +12,15 @@ import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Button, Card, Field, Input, Select, Textarea } from '@/components/ui/primitives';
+import {
+  Button, Card, Field, Input, SearchInput, Select, Textarea, Toolbar,
+} from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
 import { DataTable } from '@/components/ui/DataTable';
 import { Dialog } from '@/components/ui/Dialog';
 import { Pagination } from '@/components/ui/Pagination';
 import { CaseStatusBadge } from '@/components/ui/StatusBadge';
-import { formatDate } from '@/lib/format';
+import { formatDate, humanise } from '@/lib/format';
 import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
 import type { CaseStatus, LegalCase } from '@/types/api';
 
@@ -84,8 +86,7 @@ function CreateCaseForm({ defaultClientId, onDone, onCancel }: {
         )}
       </Field>
 
-      <Field label="Client" error={errors.clientId?.message} required
-        hint="The matter's number is issued by the system when it is opened.">
+      <Field label="Client" error={errors.clientId?.message} required>
         {({ id, describedBy, invalid }) => (
           <Select id={id} aria-describedby={describedBy} invalid={invalid}
             disabled={clients.isPending} {...register('clientId')}>
@@ -152,40 +153,50 @@ export function CaseListPage() {
         title="Matters"
         description="Every matter the firm is running."
         actions={can(user?.role, 'createCases') && (
-          <Button onClick={() => setCreating(true)}>Open matter</Button>
+          <Button icon="plus" onClick={() => setCreating(true)}>Open matter</Button>
         )}
       />
 
       <Card>
-        <div className="flex flex-wrap gap-3 border-b border-ink-200 p-3">
-          <div className="min-w-[12rem] flex-1">
-            <label htmlFor="case-search" className="sr-only">Search matters</label>
-            <Input id="case-search" type="search" placeholder="Search by title or number"
-              value={searchInput} onChange={(event) => setSearchInput(event.target.value)} />
+        <Toolbar>
+          <div className="min-w-[12rem] flex-1 sm:max-w-xs">
+            <Field label="Search matters" srOnlyLabel>
+              {({ id }) => (
+                <SearchInput id={id} placeholder="Title or matter number"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)} />
+              )}
+            </Field>
           </div>
-          <div>
-            <label htmlFor="case-status" className="sr-only">Filter by status</label>
-            <Select id="case-status" value={params.status}
-              onChange={(event) => update({ status: event.target.value })}>
-              <option value="">All statuses</option>
-              {CASE_STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {status.charAt(0) + status.slice(1).toLowerCase().replace('_', ' ')}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <label htmlFor="case-client" className="sr-only">Filter by client</label>
-            <Select id="case-client" value={params.clientId}
-              onChange={(event) => update({ clientId: event.target.value })}>
-              <option value="">All clients</option>
-              {clients.data?.items.map((client) => (
-                <option key={client.id} value={client.id}>{client.displayName}</option>
-              ))}
-            </Select>
-          </div>
-        </div>
+          <Field label="Status" srOnlyLabel>
+            {({ id }) => (
+              <Select id={id} value={params.status} aria-label="Filter by status"
+                onChange={(event) => update({ status: event.target.value })}>
+                <option value="">All statuses</option>
+                {CASE_STATUSES.map((status) => (
+                  <option key={status} value={status}>{humanise(status)}</option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="Client" srOnlyLabel>
+            {({ id }) => (
+              <Select id={id} value={params.clientId} aria-label="Filter by client"
+                onChange={(event) => update({ clientId: event.target.value })}>
+                <option value="">All clients</option>
+                {clients.data?.items.map((client) => (
+                  <option key={client.id} value={client.id}>{client.displayName}</option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          {(params.search || params.status || params.clientId) && (
+            <Button variant="ghost" size="sm"
+              onClick={() => { setSearchInput(''); update({ search: '', status: '', clientId: '' }); }}>
+              Clear filters
+            </Button>
+          )}
+        </Toolbar>
 
         <AsyncSection
           isLoading={query.isPending}
@@ -195,6 +206,7 @@ export function CaseListPage() {
           onRetry={() => query.refetch()}
           skeleton={<TableSkeleton columns={5} />}
           empty={<EmptyState
+            icon={params.search || params.status || params.clientId ? 'search' : 'cases'}
             title="No matters found"
             description={params.search || params.status || params.clientId
               ? 'Try widening the filters.'
@@ -214,7 +226,9 @@ export function CaseListPage() {
                     cell: (legalCase: LegalCase) => (
                       <span>
                         <span className="block font-medium text-ink-900">{legalCase.title}</span>
-                        <span className="block text-xs text-ink-500">{legalCase.caseNumber}</span>
+                        <span className="mt-0.5 block font-mono text-xs text-ink-500">
+                          {legalCase.caseNumber}
+                        </span>
                       </span>
                     ),
                   },
@@ -228,7 +242,11 @@ export function CaseListPage() {
                   },
                   {
                     key: 'opened', header: 'Opened',
-                    cell: (legalCase: LegalCase) => formatDate(legalCase.openedAt),
+                    cell: (legalCase: LegalCase) => (
+                      <span className="whitespace-nowrap text-ink-600">
+                        {formatDate(legalCase.openedAt)}
+                      </span>
+                    ),
                   },
                 ]}
               />
@@ -238,7 +256,11 @@ export function CaseListPage() {
         </AsyncSection>
       </Card>
 
-      <Dialog open={creating} onClose={() => setCreating(false)} title="Open a matter" footer={<span />}>
+      <Dialog
+        open={creating} onClose={() => setCreating(false)} title="Open a matter"
+        description="The matter number is issued by the system once it is opened."
+        footer={<span />}
+      >
         <CreateCaseForm
           defaultClientId={params.clientId || undefined}
           onCancel={() => setCreating(false)}

@@ -9,7 +9,7 @@ import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Badge, Button, Card, Input } from '@/components/ui/primitives';
+import { Badge, Button, Card, Field, SearchInput, Toolbar } from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
 import { DataTable } from '@/components/ui/DataTable';
 import { Dialog } from '@/components/ui/Dialog';
@@ -59,18 +59,25 @@ export function ClientListPage() {
       <PageHeader
         title="Clients"
         description="Everyone the firm acts for. Removed clients are hidden."
-        actions={mayManage && <Button onClick={() => setCreating(true)}>Add client</Button>}
+        actions={mayManage && (
+          <Button icon="plus" onClick={() => setCreating(true)}>Add client</Button>
+        )}
       />
 
       <Card>
-        <div className="border-b border-ink-200 p-3">
-          <label htmlFor="client-search" className="sr-only">Search clients</label>
-          <Input
-            id="client-search" type="search" placeholder="Search by name, email or phone"
-            value={searchInput} onChange={(event) => setSearchInput(event.target.value)}
-            className="max-w-sm"
-          />
-        </div>
+        <Toolbar>
+          <div className="w-full sm:max-w-xs">
+            <Field label="Search clients" srOnlyLabel>
+              {({ id }) => (
+                <SearchInput
+                  id={id} placeholder="Name, email or phone"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)}
+                />
+              )}
+            </Field>
+          </div>
+        </Toolbar>
 
         <AsyncSection
           isLoading={query.isPending}
@@ -81,6 +88,7 @@ export function ClientListPage() {
           skeleton={<TableSkeleton columns={4} />}
           empty={
             <EmptyState
+              icon={params.search ? 'search' : 'clients'}
               title={params.search ? 'No clients match that search' : 'No clients yet'}
               description={
                 params.search
@@ -110,16 +118,28 @@ export function ClientListPage() {
                   {
                     key: 'type', header: 'Type',
                     cell: (client: Client) => (
-                      <Badge tone={client.clientType === 'CORPORATE' ? 'info' : 'neutral'}>
+                      <Badge tone={client.clientType === 'CORPORATE' ? 'info' : 'neutral'} dot>
                         {client.clientType === 'CORPORATE' ? 'Corporate' : 'Individual'}
                       </Badge>
                     ),
                   },
-                  { key: 'email', header: 'Email', cell: (client: Client) => client.email ?? '—' },
-                  { key: 'phone', header: 'Phone', cell: (client: Client) => client.phone ?? '—' },
+                  {
+                    key: 'email', header: 'Email',
+                    cell: (client: Client) => client.email
+                      ? <span className="truncate">{client.email}</span>
+                      : <span className="text-ink-500">—</span>,
+                  },
+                  {
+                    key: 'phone', header: 'Phone',
+                    cell: (client: Client) => client.phone ?? <span className="text-ink-500">—</span>,
+                  },
                   {
                     key: 'added', header: 'Added',
-                    cell: (client: Client) => formatDate(client.createdAt),
+                    cell: (client: Client) => (
+                      <span className="whitespace-nowrap text-ink-600">
+                        {formatDate(client.createdAt)}
+                      </span>
+                    ),
                   },
                 ]}
               />
@@ -129,7 +149,11 @@ export function ClientListPage() {
         </AsyncSection>
       </Card>
 
-      <Dialog open={creating} onClose={() => setCreating(false)} title="Add client" footer={<span />}>
+      <Dialog
+        open={creating} onClose={() => setCreating(false)} title="Add a client"
+        description="Matters, invoices and documents are all opened against a client."
+        footer={<span />}
+      >
         <ClientForm
           submitLabel="Add client"
           onCancel={() => setCreating(false)}

@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth/AuthContext';
-import { Button, Field, Input } from '@/components/ui/primitives';
+import { Alert, Button, Field, Input, PasswordInput } from '@/components/ui/primitives';
 import { ApiError } from '@/lib/api/errors';
 import { AuthLayout } from './AuthLayout';
 
@@ -45,32 +45,29 @@ export function LoginPage() {
 
   return (
     <AuthLayout title="Sign in" subtitle="Access your firm's workspace.">
-      <form onSubmit={onSubmit} noValidate className="space-y-4">
-        {formError && (
-          <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-            {formError}
-          </div>
-        )}
+      <form onSubmit={onSubmit} noValidate className="space-y-5">
+        {formError && <Alert tone="danger" live>{formError}</Alert>}
 
         <Field label="Email address" error={errors.email?.message} required>
           {({ id, describedBy, invalid }) => (
             <Input id={id} type="email" autoComplete="email" autoFocus
+              placeholder="you@firm.example"
               aria-describedby={describedBy} invalid={invalid} {...register('email')} />
           )}
         </Field>
 
         <Field label="Password" error={errors.password?.message} required>
           {({ id, describedBy, invalid }) => (
-            <Input id={id} type="password" autoComplete="current-password"
+            <PasswordInput id={id} autoComplete="current-password"
               aria-describedby={describedBy} invalid={invalid} {...register('password')} />
           )}
         </Field>
 
         <Button type="submit" loading={isSubmitting} className="w-full">Sign in</Button>
 
-        <p className="text-center text-sm text-ink-600">
+        <p className="border-t border-ink-200 pt-5 text-center text-sm text-ink-600">
           New firm?{' '}
-          <Link to="/register" className="font-medium text-brand-700 hover:underline">
+          <Link to="/register" className="rounded font-medium text-brand-700 hover:underline">
             Create an account
           </Link>
         </p>

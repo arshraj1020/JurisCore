@@ -39,6 +39,9 @@ function boot(role: Role, route = '/') {
     http.get('/api/v1/cases', () => HttpResponse.json(envelope(pageOf([])))),
     http.get('/api/v1/hearings', () => HttpResponse.json(envelope(pageOf([])))),
     http.get('/api/v1/invoices', () => HttpResponse.json(envelope(pageOf([])))),
+    http.get('/api/v1/reminders', () => HttpResponse.json(envelope(pageOf([])))),
+    http.get('/api/v1/notifications', () => HttpResponse.json(envelope(pageOf([])))),
+    http.get('/api/v1/audit', () => HttpResponse.json(envelope(pageOf([])))),
   );
   window.localStorage.setItem('juriscore.refreshToken', 'refresh-0');
 

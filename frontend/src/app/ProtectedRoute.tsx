@@ -2,7 +2,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { can, isFirmStaff } from '@/lib/auth/roles';
 import type { Permission } from '@/lib/auth/roles';
-import { Spinner } from '@/components/ui/primitives';
+import { Card, Spinner } from '@/components/ui/primitives';
 import { EmptyState } from '@/components/ui/states';
 
 function FullPageSpinner() {
@@ -45,10 +45,15 @@ export function RequirePermission({ permission }: { permission: Permission }) {
   const { user } = useAuth();
   if (!can(user?.role, permission)) {
     return (
-      <EmptyState
-        title="You do not have access to this"
-        description="Your role does not include this area of the firm. If you think that is wrong, ask an administrator."
-      />
+      <div className="mx-auto max-w-xl py-6">
+        <Card>
+          <EmptyState
+            icon="info"
+            title="You do not have access to this"
+            description="Your role does not include this area of the firm. If you think that is wrong, ask an administrator."
+          />
+        </Card>
+      </div>
     );
   }
   return <Outlet />;
@@ -65,15 +70,18 @@ export function RequireFirmContext({ children }: { children: React.ReactNode }) 
   const { user } = useAuth();
   if (user && !isFirmStaff(user.role)) {
     return (
-      <div className="mx-auto max-w-lg px-4 py-16">
-        <EmptyState
-          title={user.role === 'SUPER_ADMIN' ? 'Platform accounts have no firm workspace' : 'No workspace for this account'}
-          description={
-            user.role === 'SUPER_ADMIN'
-              ? 'A platform administrator is not scoped to any single firm, so the firm workspace does not apply. Sign in with a firm account to use it.'
-              : 'This account does not have access to the firm workspace.'
-          }
-        />
+      <div className="mx-auto max-w-xl px-4 py-16">
+        <Card>
+          <EmptyState
+            icon="info"
+            title={user.role === 'SUPER_ADMIN' ? 'Platform accounts have no firm workspace' : 'No workspace for this account'}
+            description={
+              user.role === 'SUPER_ADMIN'
+                ? 'A platform administrator is not scoped to any single firm, so the firm workspace does not apply. Sign in with a firm account to use it.'
+                : 'This account does not have access to the firm workspace.'
+            }
+          />
+        </Card>
       </div>
     );
   }

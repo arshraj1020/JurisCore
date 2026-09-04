@@ -130,10 +130,11 @@ export function CaseHearingsTab({ caseId }: { caseId: string }) {
   return (
     <Card>
       <CardHeader
+        icon="hearings"
         title="Hearings"
         description="Listed appearances for this matter."
         actions={mayManage && (
-          <Button size="sm" onClick={() => setScheduling(true)}>Schedule hearing</Button>
+          <Button size="sm" icon="plus" onClick={() => setScheduling(true)}>Schedule hearing</Button>
         )}
       />
 
@@ -146,6 +147,7 @@ export function CaseHearingsTab({ caseId }: { caseId: string }) {
         skeleton={<TableSkeleton rows={3} columns={3} />}
         empty={(
           <EmptyState
+            compact icon="calendar"
             title="No hearings"
             description="Nothing has been listed against this matter yet."
           />
@@ -159,7 +161,7 @@ export function CaseHearingsTab({ caseId }: { caseId: string }) {
               const court = courtName(hearing.courtId);
               return (
                 <li key={hearing.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 basis-full sm:flex-1 sm:basis-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-medium text-ink-900">
                         {humanise(hearing.hearingType)}
@@ -168,11 +170,11 @@ export function CaseHearingsTab({ caseId }: { caseId: string }) {
                     </div>
                     <p className="mt-1 text-sm text-ink-600">
                       {formatDateTime(hearing.scheduledAt)}
-                      <span className="text-ink-400"> · </span>
+                      <span className="text-ink-500"> · </span>
                       {formatRelative(hearing.scheduledAt)}
                       {typeof hearing.durationMinutes === 'number' && (
                         <>
-                          <span className="text-ink-400"> · </span>
+                          <span className="text-ink-500"> · </span>
                           {hearing.durationMinutes} min
                         </>
                       )}
@@ -192,14 +194,14 @@ export function CaseHearingsTab({ caseId }: { caseId: string }) {
                     )}
                   </div>
                   {options.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex w-full flex-wrap gap-1 sm:w-auto sm:justify-end">
                       {options.map((next) => (
                         <Button
                           key={next} size="sm" variant="secondary"
                           disabled={changeStatus.isPending}
                           onClick={() => applyStatus(hearing.id, next)}
                         >
-                          {humanise(next)}
+                          {next === 'SCHEDULED' ? 'Relist' : `Mark ${humanise(next).toLowerCase()}`}
                         </Button>
                       ))}
                     </div>

@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth/AuthContext';
-import { Button, Field, Input } from '@/components/ui/primitives';
+import { Alert, Button, Field, Input, PasswordInput } from '@/components/ui/primitives';
 import { ApiError, fieldErrorsOf } from '@/lib/api/errors';
 import { AuthLayout } from './AuthLayout';
 
@@ -59,13 +59,13 @@ export function RegisterPage() {
   });
 
   return (
-    <AuthLayout title="Create your firm" subtitle="You will be its first administrator.">
-      <form onSubmit={onSubmit} noValidate className="space-y-4">
-        {formError && (
-          <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-            {formError}
-          </div>
-        )}
+    <AuthLayout
+      title="Create your firm"
+      subtitle="You will be its first administrator, and can invite colleagues afterwards."
+      wide
+    >
+      <form onSubmit={onSubmit} noValidate className="space-y-5">
+        {formError && <Alert tone="danger" live>{formError}</Alert>}
 
         <Field label="Firm name" error={errors.firmName?.message} required>
           {({ id, describedBy, invalid }) => (
@@ -74,7 +74,7 @@ export function RegisterPage() {
           )}
         </Field>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field label="First name" error={errors.firstName?.message} required>
             {({ id, describedBy, invalid }) => (
               <Input id={id} autoComplete="given-name" aria-describedby={describedBy}
@@ -97,18 +97,20 @@ export function RegisterPage() {
         </Field>
 
         <Field label="Password" error={errors.password?.message} required
-          hint="At least 12 characters.">
+          hint="At least 12 characters. The server applies the firm's full policy.">
           {({ id, describedBy, invalid }) => (
-            <Input id={id} type="password" autoComplete="new-password"
+            <PasswordInput id={id} autoComplete="new-password"
               aria-describedby={describedBy} invalid={invalid} {...register('password')} />
           )}
         </Field>
 
         <Button type="submit" loading={isSubmitting} className="w-full">Create firm</Button>
 
-        <p className="text-center text-sm text-ink-600">
+        <p className="border-t border-ink-200 pt-5 text-center text-sm text-ink-600">
           Already have an account?{' '}
-          <Link to="/login" className="font-medium text-brand-700 hover:underline">Sign in</Link>
+          <Link to="/login" className="rounded font-medium text-brand-700 hover:underline">
+            Sign in
+          </Link>
         </p>
       </form>
     </AuthLayout>

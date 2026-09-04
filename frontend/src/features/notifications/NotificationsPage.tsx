@@ -5,16 +5,32 @@ import { keys } from '@/lib/api/queryKeys';
 import { useListParams } from '@/lib/api/hooks';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Badge, Button, Card, CardHeader } from '@/components/ui/primitives';
+import { Badge, Button, Card, CardHeader, Toggle, Toolbar } from '@/components/ui/primitives';
+import { Icon } from '@/components/ui/icons';
 import type { Tone } from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
 import { Pagination } from '@/components/ui/Pagination';
 import { formatDateTime, formatRelative, humanise } from '@/lib/format';
 import { messageFor } from '@/lib/api/errors';
-import type { AppNotification, NotificationSeverity } from '@/types/api';
+import type {
+  AppNotification, NotificationCategory, NotificationSeverity,
+} from '@/types/api';
+import type { IconName } from '@/components/ui/icons';
+import { cn } from '@/lib/cn';
 
 const SEVERITY: Record<NotificationSeverity, Tone> = {
   INFO: 'info', SUCCESS: 'success', WARNING: 'warning', CRITICAL: 'danger',
+};
+
+const SEVERITY_SURFACE: Record<NotificationSeverity, string> = {
+  INFO: 'bg-brand-50 text-brand-600',
+  SUCCESS: 'bg-emerald-50 text-emerald-600',
+  WARNING: 'bg-amber-50 text-amber-600',
+  CRITICAL: 'bg-red-50 text-red-600',
+};
+
+const CATEGORY_ICON: Record<NotificationCategory, IconName> = {
+  INVOICE: 'invoices', PAYMENT: 'money', CASE: 'cases', SYSTEM: 'info',
 };
 
 /**
@@ -96,7 +112,7 @@ export function NotificationsPage() {
         description="What has happened while you were elsewhere."
         actions={(
           <Button
-            variant="secondary"
+            variant="secondary" icon="check"
             loading={markAllRead.isPending}
             onClick={() => markAllRead.mutate()}
           >
@@ -107,17 +123,17 @@ export function NotificationsPage() {
 
       <div className="space-y-4">
         <Card>
-          <div className="flex flex-wrap items-center gap-3 border-b border-ink-200 p-3">
-            <label className="flex items-center gap-2 text-sm text-ink-700">
+          <Toolbar className="items-center">
+            <label className="flex cursor-pointer items-center gap-2 py-1.5 text-sm text-ink-700">
               <input
                 type="checkbox"
-                className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+                className="h-4 w-4 cursor-pointer rounded border-ink-300 text-brand-600 focus:ring-brand-500"
                 checked={unreadOnly}
                 onChange={(event) => update({ unread: event.target.checked ? 'true' : '' })}
               />
               Unread only
             </label>
-          </div>
+          </Toolbar>
 
           <AsyncSection
             isLoading={query.isPending}
@@ -128,6 +144,7 @@ export function NotificationsPage() {
             skeleton={<TableSkeleton rows={4} columns={2} />}
             empty={(
               <EmptyState
+                icon={unreadOnly ? 'check' : 'bell'}
                 title={unreadOnly ? 'Nothing unread' : 'No notifications'}
                 description={unreadOnly
                   ? 'You are up to date.'
@@ -143,29 +160,42 @@ export function NotificationsPage() {
                     return (
                       <li
                         key={notification.id}
-                        className={notification.read ? 'bg-white' : 'bg-brand-50/40'}
+                        className={cn(
+                          'transition-colors',
+                          notification.read ? 'bg-white' : 'bg-brand-50/50',
+                        )}
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
-                          <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-start gap-3 px-4 py-3">
+                          {/* An unread marker as well as the tint: a background wash alone
+                              is easy to miss and invisible in high-contrast modes. */}
+                          <span className={cn(
+                            'mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-md',
+                            SEVERITY_SURFACE[notification.severity],
+                          )}>
+                            <Icon name={CATEGORY_ICON[notification.category]} className="h-4 w-4" />
+                          </span>
+
+                          <div className="min-w-0 basis-full sm:flex-1 sm:basis-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-sm font-medium text-ink-900">
                                 {notification.title}
                               </span>
+                              {!notification.read && <Badge tone="info" dot>New</Badge>}
+                            </div>
+                            <p className="mt-1 text-sm text-ink-600">{notification.message}</p>
+                            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
                               <Badge tone={SEVERITY[notification.severity]}>
                                 {humanise(notification.category)}
                               </Badge>
-                              {!notification.read && <Badge tone="info">New</Badge>}
-                            </div>
-                            <p className="mt-1 text-sm text-ink-600">{notification.message}</p>
-                            <p className="mt-1 text-xs text-ink-500">
                               <time dateTime={notification.createdAt}>
                                 {formatDateTime(notification.createdAt)}
                               </time>
-                              <span className="text-ink-400"> · </span>
+                              <span className="text-ink-300">·</span>
                               {formatRelative(notification.createdAt)}
                             </p>
                           </div>
-                          <div className="flex flex-wrap gap-1">
+
+                          <div className="flex w-full flex-wrap gap-1 sm:w-auto sm:justify-end">
                             {path && (
                               <Button size="sm" variant="secondary"
                                 onClick={() => open(notification)}>
@@ -202,6 +232,7 @@ export function NotificationsPage() {
 
         <Card>
           <CardHeader
+            icon="settings"
             title="What you are notified about"
             description="Turning a category off stops new notifications in it; it does not delete past ones."
           />
@@ -213,21 +244,14 @@ export function NotificationsPage() {
                 ['caseUpdates', 'Matters', 'Being assigned to a matter.'],
                 ['system', 'System', 'Announcements and account messages.'],
               ] as const).map(([key, label, description]) => (
-                <li key={key} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div>
-                    <p className="text-sm font-medium text-ink-900">{label}</p>
-                    <p className="text-xs text-ink-500">{description}</p>
-                  </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <span className="sr-only">{label}</span>
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
-                      checked={preferences.data[key]}
-                      disabled={setPreference.isPending}
-                      onChange={(event) => setPreference.mutate({ [key]: event.target.checked })}
-                    />
-                  </label>
+                <li key={key} className="px-4 py-3">
+                  <Toggle
+                    label={label}
+                    description={description}
+                    checked={preferences.data[key]}
+                    disabled={setPreference.isPending}
+                    onChange={(checked) => setPreference.mutate({ [key]: checked })}
+                  />
                 </li>
               ))}
             </ul>

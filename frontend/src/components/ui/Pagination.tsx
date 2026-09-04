@@ -18,36 +18,47 @@ export function Pagination<T>({ page, onPageChange, label }: {
 
   const first = page.page * page.size + 1;
   const last = Math.min(first + page.size - 1, page.totalItems);
+  const onlyPage = page.totalPages <= 1;
 
   return (
     <nav
       aria-label={`${label} pagination`}
-      className="flex flex-wrap items-center justify-between gap-3 border-t border-ink-200 px-4 py-3"
+      className="flex flex-wrap items-center justify-between gap-3 border-t border-ink-200 bg-ink-50/60 px-4 py-2.5"
     >
       <p className="text-xs text-ink-600" aria-live="polite">
-        Showing <span className="font-medium text-ink-900">{first}</span>–
-        <span className="font-medium text-ink-900">{last}</span> of{' '}
-        <span className="font-medium text-ink-900">{page.totalItems}</span> {label}
+        {onlyPage ? (
+          <>
+            <span className="font-medium text-ink-900">{page.totalItems}</span> {label}
+          </>
+        ) : (
+          <>
+            <span className="font-medium text-ink-900">{first}</span>–
+            <span className="font-medium text-ink-900">{last}</span> of{' '}
+            <span className="font-medium text-ink-900">{page.totalItems}</span> {label}
+          </>
+        )}
       </p>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="secondary" size="sm"
-          disabled={page.page === 0}
-          onClick={() => onPageChange(page.page - 1)}
-        >
-          Previous
-        </Button>
-        <span className="text-xs text-ink-500">
-          Page {page.page + 1} of {Math.max(page.totalPages, 1)}
-        </span>
-        <Button
-          variant="secondary" size="sm"
-          disabled={!page.hasNext}
-          onClick={() => onPageChange(page.page + 1)}
-        >
-          Next
-        </Button>
-      </div>
+      {!onlyPage && (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary" size="sm"
+            disabled={page.page === 0}
+            onClick={() => onPageChange(page.page - 1)}
+          >
+            Previous
+          </Button>
+          <span className="whitespace-nowrap text-xs text-ink-500">
+            Page {page.page + 1} of {Math.max(page.totalPages, 1)}
+          </span>
+          <Button
+            variant="secondary" size="sm"
+            disabled={!page.hasNext}
+            onClick={() => onPageChange(page.page + 1)}
+          >
+            Next
+          </Button>
+        </div>
+      )}
     </nav>
   );
 }

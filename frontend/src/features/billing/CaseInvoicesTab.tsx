@@ -23,11 +23,12 @@ export function CaseInvoicesTab({ caseId, clientId }: { caseId: string; clientId
   return (
     <Card>
       <CardHeader
+        icon="invoices"
         title="Invoices"
         description="Billing raised against this matter."
         actions={can(user?.role, 'draftInvoices') && (
           <Button
-            size="sm"
+            size="sm" icon="plus"
             onClick={() => navigate(`/invoices/new?clientId=${clientId}&caseId=${caseId}`)}
           >
             New invoice
@@ -44,6 +45,7 @@ export function CaseInvoicesTab({ caseId, clientId }: { caseId: string; clientId
         skeleton={<TableSkeleton rows={3} columns={4} />}
         empty={(
           <EmptyState
+            compact icon="invoices"
             title="Nothing billed"
             description="No invoice has been raised against this matter yet."
           />
@@ -59,7 +61,9 @@ export function CaseInvoicesTab({ caseId, clientId }: { caseId: string; clientId
               {
                 key: 'number', header: 'Invoice', primary: true,
                 cell: (invoice: Invoice) => (
-                  <span className="font-medium text-ink-900">{invoice.invoiceNumber}</span>
+                  <span className="font-mono font-medium text-ink-900">
+                    {invoice.invoiceNumber}
+                  </span>
                 ),
               },
               {
@@ -71,14 +75,18 @@ export function CaseInvoicesTab({ caseId, clientId }: { caseId: string; clientId
                 cell: (invoice: Invoice) => formatDate(invoice.issueDate),
               },
               {
-                key: 'total', header: 'Total',
-                className: 'text-right tabular-nums', headerClassName: 'text-right',
+                key: 'total', header: 'Total', numeric: true,
                 cell: (invoice: Invoice) => formatMoney(invoice.totalAmount, invoice.currency),
               },
               {
-                key: 'outstanding', header: 'Outstanding',
-                className: 'text-right tabular-nums', headerClassName: 'text-right',
-                cell: (invoice: Invoice) => formatMoney(invoice.amountDue, invoice.currency),
+                key: 'outstanding', header: 'Outstanding', numeric: true,
+                cell: (invoice: Invoice) => (
+                  <span className={invoice.amountDue === '0.00'
+                    ? 'text-ink-500'
+                    : 'font-medium text-ink-900'}>
+                    {formatMoney(invoice.amountDue, invoice.currency)}
+                  </span>
+                ),
               },
             ]}
           />

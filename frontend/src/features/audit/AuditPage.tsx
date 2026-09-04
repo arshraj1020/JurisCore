@@ -5,11 +5,13 @@ import { usersApi } from '@/features/auth/api';
 import { keys } from '@/lib/api/queryKeys';
 import { useDebounced, useListParams } from '@/lib/api/hooks';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Card, Input, Select } from '@/components/ui/primitives';
+import {
+  Alert, Button, Card, Field, Input, SearchInput, Select, Toolbar,
+} from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
 import { DataTable } from '@/components/ui/DataTable';
 import { Pagination } from '@/components/ui/Pagination';
-import { formatDateTime, humanise } from '@/lib/format';
+import { formatDateTime } from '@/lib/format';
 import type { AuditEvent } from '@/types/api';
 
 /**
@@ -64,37 +66,59 @@ export function AuditPage() {
     <>
       <PageHeader
         title="Audit trail"
-        description="A record of what happened, who did it and when. Entries cannot be edited or removed."
+        description="A record of what happened, who did it and when."
       />
 
+      <Alert tone="neutral" className="mb-4">
+        The trail is append-only. There is no edit and no delete here — not hidden from your
+        role, but absent, because a record that can be altered from the application it
+        watches is not a record.
+      </Alert>
+
       <Card>
-        <div className="flex flex-wrap gap-3 border-b border-ink-200 p-3">
-          <div className="min-w-[12rem] flex-1">
-            <label htmlFor="audit-action" className="sr-only">Filter by action</label>
-            <Input id="audit-action" type="search" placeholder="Action, e.g. INVOICE_ISSUED"
-              value={actionInput} onChange={(event) => setActionInput(event.target.value)} />
+        <Toolbar>
+          <div className="min-w-[12rem] flex-1 sm:max-w-xs">
+            <Field label="Filter by action" srOnlyLabel>
+              {({ id }) => (
+                <SearchInput id={id} placeholder="Action, e.g. INVOICE_ISSUED"
+                  value={actionInput}
+                  onChange={(event) => setActionInput(event.target.value)} />
+              )}
+            </Field>
           </div>
-          <div>
-            <label htmlFor="audit-entity" className="sr-only">Filter by entity type</label>
-            <Select id="audit-entity" value={params.entityType}
-              onChange={(event) => update({ entityType: event.target.value })}>
-              <option value="">All entities</option>
-              {entityTypes.map((type) => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <label htmlFor="audit-from" className="block text-xs text-ink-500">From</label>
-            <Input id="audit-from" type="date" value={params.from}
-              onChange={(event) => update({ from: event.target.value })} />
-          </div>
-          <div>
-            <label htmlFor="audit-to" className="block text-xs text-ink-500">To</label>
-            <Input id="audit-to" type="date" value={params.to}
-              onChange={(event) => update({ to: event.target.value })} />
-          </div>
-        </div>
+          <Field label="Entity" srOnlyLabel>
+            {({ id }) => (
+              <Select id={id} value={params.entityType} aria-label="Filter by entity type"
+                onChange={(event) => update({ entityType: event.target.value })}>
+                <option value="">All entities</option>
+                {entityTypes.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="From">
+            {({ id }) => (
+              <Input id={id} type="date" value={params.from}
+                onChange={(event) => update({ from: event.target.value })} />
+            )}
+          </Field>
+          <Field label="To">
+            {({ id }) => (
+              <Input id={id} type="date" value={params.to}
+                onChange={(event) => update({ to: event.target.value })} />
+            )}
+          </Field>
+          {(params.action || params.entityType || params.from || params.to) && (
+            <Button variant="ghost" size="sm"
+              onClick={() => {
+                setActionInput('');
+                update({ action: '', entityType: '', entityId: '', from: '', to: '' });
+              }}>
+              Clear filters
+            </Button>
+          )}
+        </Toolbar>
 
         <AsyncSection
           isLoading={query.isPending}
@@ -105,6 +129,7 @@ export function AuditPage() {
           skeleton={<TableSkeleton columns={5} />}
           empty={(
             <EmptyState
+              icon="audit"
               title="No audit entries"
               description="Nothing matches these filters."
             />
@@ -122,15 +147,17 @@ export function AuditPage() {
                     cell: (event: AuditEvent) => (
                       <span>
                         <span className="block text-ink-900">{event.summary}</span>
-                        <span className="block text-xs text-ink-500">
-                          {humanise(event.action)}
+                        <span className="mt-0.5 block font-mono text-2xs uppercase tracking-wide text-ink-500">
+                          {event.action}
                         </span>
                       </span>
                     ),
                   },
                   {
                     key: 'actor', header: 'Who',
-                    cell: (event: AuditEvent) => actorName(event.actorUserId),
+                    cell: (event: AuditEvent) => (
+                      <span className="whitespace-nowrap">{actorName(event.actorUserId)}</span>
+                    ),
                   },
                   {
                     key: 'entity', header: 'Entity',
@@ -148,7 +175,9 @@ export function AuditPage() {
                   {
                     key: 'when', header: 'When',
                     cell: (event: AuditEvent) => (
-                      <time dateTime={event.occurredAt}>{formatDateTime(event.occurredAt)}</time>
+                      <time dateTime={event.occurredAt} className="whitespace-nowrap text-ink-600">
+                        {formatDateTime(event.occurredAt)}
+                      </time>
                     ),
                   },
                   {

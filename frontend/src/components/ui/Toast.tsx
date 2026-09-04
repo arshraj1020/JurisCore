@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/cn';
+import { Icon } from './icons';
+import type { IconName } from './icons';
 
 /**
  * Transient feedback, used sparingly.
@@ -22,10 +24,14 @@ interface ToastApi {
 
 const ToastContext = createContext<ToastApi | null>(null);
 
-const TONES: Record<ToastTone, string> = {
-  success: 'bg-emerald-600',
-  error: 'bg-red-600',
-  info: 'bg-ink-800',
+/**
+ * Light surfaces with a coloured rail rather than solid blocks of colour: a full-bleed
+ * red panel over a working screen reads as an outage, and most of these say "saved".
+ */
+const TONES: Record<ToastTone, { box: string; icon: IconName; glyph: string }> = {
+  success: { box: 'border-l-emerald-500', icon: 'check', glyph: 'text-emerald-600' },
+  error: { box: 'border-l-red-500', icon: 'alert', glyph: 'text-red-600' },
+  info: { box: 'border-l-brand-500', icon: 'info', glyph: 'text-brand-600' },
 };
 
 let toastSeq = 0;
@@ -60,11 +66,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={toast.id}
             className={cn(
-              'pointer-events-auto max-w-sm rounded-md px-4 py-2.5 text-sm font-medium text-white shadow-lg',
-              TONES[toast.tone],
+              'pointer-events-auto flex max-w-sm animate-slide-up items-start gap-2.5 rounded-md',
+              'border border-ink-200 border-l-4 bg-white px-3.5 py-2.5 text-sm text-ink-800 shadow-pop',
+              TONES[toast.tone].box,
             )}
           >
-            {toast.message}
+            <Icon name={TONES[toast.tone].icon}
+              className={cn('mt-px h-4 w-4', TONES[toast.tone].glyph)} />
+            <span className="font-medium">{toast.message}</span>
           </div>
         ))}
       </div>

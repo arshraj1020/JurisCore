@@ -6,7 +6,9 @@ import { keys } from '@/lib/api/queryKeys';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import { useToast } from '@/components/ui/Toast';
-import { Badge, Button, Card, CardHeader, Field, Select } from '@/components/ui/primitives';
+import {
+  Avatar, Badge, Button, Card, CardHeader, Detail, DetailList, Field, Select,
+} from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
 import { ConfirmDialog, Dialog } from '@/components/ui/Dialog';
 import { formatDate, formatDateTime } from '@/lib/format';
@@ -127,36 +129,37 @@ export function CaseOverviewTab({ legalCase }: { legalCase: LegalCase }) {
   const mayManage = can(user?.role, 'manageAssignments');
 
   return (
-    <div className="grid gap-4 lg:grid-cols-3">
+    <div className="grid items-start gap-4 lg:grid-cols-3">
       <Card className="lg:col-span-1">
-        <CardHeader title="Matter details" />
-        <dl className="divide-y divide-ink-100 px-4 py-2 text-sm">
-          {[
-            ['Number', legalCase.caseNumber],
-            ['Opened', formatDate(legalCase.openedAt)],
-            ['Closed', legalCase.closedAt ? formatDate(legalCase.closedAt) : '—'],
-            ['Last updated', formatDateTime(legalCase.updatedAt)],
-          ].map(([label, value]) => (
-            <div key={label} className="grid grid-cols-[7rem,1fr] gap-3 py-2">
-              <dt className="text-ink-500">{label}</dt>
-              <dd className="text-ink-900">{value}</dd>
-            </div>
-          ))}
-          <div className="py-2">
-            <dt className="text-ink-500">Description</dt>
-            <dd className="mt-1 whitespace-pre-wrap text-ink-900">
-              {legalCase.description || '—'}
-            </dd>
-          </div>
-        </dl>
+        <CardHeader title="Matter details" icon="info" />
+        <DetailList columns={2} className="sm:grid-cols-2 lg:grid-cols-1">
+          <Detail label="Matter number">
+            <span className="font-mono">{legalCase.caseNumber}</span>
+          </Detail>
+          <Detail label="Opened">{formatDate(legalCase.openedAt)}</Detail>
+          <Detail label="Closed">
+            {legalCase.closedAt
+              ? formatDate(legalCase.closedAt)
+              : <span className="text-ink-500">Still open</span>}
+          </Detail>
+          <Detail label="Last updated">
+            <span className="text-ink-600">{formatDateTime(legalCase.updatedAt)}</span>
+          </Detail>
+          <Detail label="Description" className="sm:col-span-2 lg:col-span-1">
+            {legalCase.description
+              ? <span className="whitespace-pre-wrap text-ink-700">{legalCase.description}</span>
+              : <span className="text-ink-500">No description recorded</span>}
+          </Detail>
+        </DetailList>
       </Card>
 
       <Card className="lg:col-span-2">
         <CardHeader
           title="Assigned lawyers"
+          icon="people"
           description="Who is working this matter, and who leads it."
           actions={mayManage && (
-            <Button size="sm" variant="secondary" onClick={() => setAssigning(true)}>
+            <Button size="sm" variant="secondary" icon="plus" onClick={() => setAssigning(true)}>
               Assign lawyer
             </Button>
           )}
@@ -168,30 +171,33 @@ export function CaseOverviewTab({ legalCase }: { legalCase: LegalCase }) {
           isEmpty={(data) => data.length === 0}
           onRetry={() => assignments.refetch()}
           skeleton={<TableSkeleton rows={2} columns={2} />}
-          empty={<EmptyState title="Nobody assigned yet"
+          empty={<EmptyState compact icon="people" title="Nobody assigned yet"
             description="Assign a lawyer so the matter shows up in their work." />}
         >
           {(data) => (
             <ul className="divide-y divide-ink-100">
               {data.map((assignment) => (
                 <li key={assignment.id}
-                  className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-                  <span className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-ink-900">
-                      {nameOf(assignment.lawyerUserId)}
+                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    <Avatar name={nameOf(assignment.lawyerUserId)} size="sm" />
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate text-sm font-medium text-ink-900">
+                          {nameOf(assignment.lawyerUserId)}
+                        </span>
+                        {assignment.lead && <Badge tone="info">Lead</Badge>}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-ink-500">
+                        Assigned {formatDate(assignment.assignedAt)}
+                      </span>
                     </span>
-                    {assignment.lead && <Badge tone="info">Lead</Badge>}
                   </span>
-                  <span className="flex items-center gap-3">
-                    <span className="text-xs text-ink-500">
-                      Assigned {formatDate(assignment.assignedAt)}
-                    </span>
-                    {mayManage && (
-                      <Button size="sm" variant="ghost" onClick={() => setRemoving(assignment)}>
-                        Remove
-                      </Button>
-                    )}
-                  </span>
+                  {mayManage && (
+                    <Button size="sm" variant="ghost" onClick={() => setRemoving(assignment)}>
+                      Remove
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>

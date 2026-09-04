@@ -10,7 +10,9 @@ import { keys } from '@/lib/api/queryKeys';
 import { useUnsavedChangesWarning } from '@/lib/api/hooks';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Button, Card, CardHeader, Field, Input, Select, Textarea } from '@/components/ui/primitives';
+import {
+  Alert, Button, Card, CardBody, CardHeader, Field, Input, Select, Textarea,
+} from '@/components/ui/primitives';
 import { estimateTotals, parseDecimal } from '@/lib/money';
 import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
 
@@ -112,6 +114,10 @@ export function InvoiceCreatePage() {
     watched.discountAmount ?? '',
   );
   const currencyLabel = (watched.currency ?? '').trim().toUpperCase();
+  // Nothing has been typed yet, so "some lines are incomplete" is not news.
+  const started = (watched.lineItems ?? []).some(
+    (line) => (line?.description ?? '') !== '' || (line?.unitPrice ?? '') !== '',
+  );
 
   const create = useMutation({
     mutationFn: (values: Values) => invoicesApi.create({
@@ -159,14 +165,10 @@ export function InvoiceCreatePage() {
       />
 
       <form onSubmit={submit} noValidate className="space-y-4">
-        {errors.root && (
-          <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-            {errors.root.message}
-          </div>
-        )}
+        {errors.root && <Alert tone="danger" live>{errors.root.message}</Alert>}
 
         <Card>
-          <CardHeader title="Who is being billed" />
+          <CardHeader title="Who is being billed" icon="clients" />
           <div className="grid gap-4 p-4 sm:grid-cols-2">
             <Field label="Client" error={errors.clientId?.message} required>
               {({ id, describedBy, invalid }) => (
@@ -199,9 +201,10 @@ export function InvoiceCreatePage() {
         <Card>
           <CardHeader
             title="Lines"
+            icon="invoices"
             description="Tax is applied per line, at the rate that line carries."
             actions={(
-              <Button type="button" size="sm" variant="secondary"
+              <Button size="sm" variant="secondary" icon="plus"
                 onClick={() => append({ ...EMPTY_LINE })}>
                 Add line
               </Button>
@@ -212,8 +215,8 @@ export function InvoiceCreatePage() {
               <p role="alert" className="text-sm text-red-700">{errors.lineItems.message}</p>
             )}
             {fields.map((field, index) => (
-              <fieldset key={field.id} className="rounded-md border border-ink-200 p-3">
-                <legend className="px-1 text-xs font-medium uppercase tracking-wide text-ink-500">
+              <fieldset key={field.id} className="rounded-md border border-ink-200 bg-ink-50/40 p-3">
+                <legend className="px-1 text-2xs font-semibold uppercase tracking-wide text-ink-500">
                   Line {index + 1}
                 </legend>
                 <div className="grid gap-3 sm:grid-cols-12">
@@ -254,7 +257,7 @@ export function InvoiceCreatePage() {
                   </div>
                   <div className="flex items-end sm:col-span-2">
                     <Button
-                      type="button" variant="ghost" size="sm"
+                      variant="ghost" size="sm" icon="trash"
                       disabled={fields.length === 1}
                       onClick={() => remove(index)}
                     >
@@ -268,7 +271,7 @@ export function InvoiceCreatePage() {
         </Card>
 
         <Card>
-          <CardHeader title="Dates, discount and notes" />
+          <CardHeader title="Dates, discount and notes" icon="calendar" />
           <div className="grid gap-4 p-4 sm:grid-cols-2">
             <Field label="Issue date" error={errors.issueDate?.message}
               hint="Optional on a draft; required to issue.">
@@ -311,31 +314,36 @@ export function InvoiceCreatePage() {
         <Card>
           <CardHeader
             title="Estimate"
-            description="Indicative only — the invoice is totalled by the server when it is saved."
+            icon="money"
+            description="Indicative only — the server totals the invoice when it is saved, and its figures are the ones that count."
           />
-          <dl className="space-y-1 p-4 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-ink-600">Subtotal</dt>
-              <dd className="tabular-nums text-ink-900">{currencyLabel} {estimate.subtotal}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-ink-600">Tax</dt>
-              <dd className="tabular-nums text-ink-900">{currencyLabel} {estimate.taxAmount}</dd>
-            </div>
-            <div className="flex justify-between border-t border-ink-200 pt-1 font-medium">
-              <dt className="text-ink-800">Estimated total</dt>
-              <dd className="tabular-nums text-ink-900">{currencyLabel} {estimate.total}</dd>
-            </div>
-            {estimate.partial && (
-              <p className="pt-1 text-xs text-amber-700">
-                Some lines are incomplete, so this estimate covers only part of the invoice.
-              </p>
-            )}
-          </dl>
+          <CardBody className="flex justify-end">
+            <dl className="w-full max-w-xs space-y-1.5 text-sm">
+              <div className="flex items-baseline justify-between gap-6">
+                <dt className="text-ink-600">Subtotal</dt>
+                <dd className="tabular-nums text-ink-800">{currencyLabel} {estimate.subtotal}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-6">
+                <dt className="text-ink-600">Tax</dt>
+                <dd className="tabular-nums text-ink-800">{currencyLabel} {estimate.taxAmount}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-6 border-t border-ink-300 pt-1.5">
+                <dt className="font-medium text-ink-800">Estimated total</dt>
+                <dd className="font-semibold tabular-nums text-ink-900">
+                  {currencyLabel} {estimate.total}
+                </dd>
+              </div>
+              {estimate.partial && started && (
+                <p className="pt-1 text-xs text-amber-700">
+                  Some lines are incomplete, so this estimate covers only part of the invoice.
+                </p>
+              )}
+            </dl>
+          </CardBody>
         </Card>
 
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={() => navigate('/invoices')}
+        <div className="flex flex-wrap justify-end gap-2 pb-2">
+          <Button variant="secondary" onClick={() => navigate('/invoices')}
             disabled={isSubmitting}>
             Cancel
           </Button>

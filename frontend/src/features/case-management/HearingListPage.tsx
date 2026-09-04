@@ -5,7 +5,7 @@ import { casesApi } from '@/features/cases/api';
 import { keys } from '@/lib/api/queryKeys';
 import { useListParams } from '@/lib/api/hooks';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Card, Input, Select } from '@/components/ui/primitives';
+import { Button, Card, Field, Input, Select, Toolbar } from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
 import { DataTable } from '@/components/ui/DataTable';
 import { Pagination } from '@/components/ui/Pagination';
@@ -56,41 +56,52 @@ export function HearingListPage() {
 
   return (
     <>
-      <PageHeader title="Diary" description="Hearings listed across the firm's matters." />
+      <PageHeader
+        title="Diary"
+        description="Hearings listed across the firm's matters. Hearings are scheduled from the matter they belong to."
+      />
 
       <Card>
-        <div className="flex flex-wrap gap-3 border-b border-ink-200 p-3">
-          <div>
-            <label htmlFor="hearing-status" className="sr-only">Filter by status</label>
-            <Select id="hearing-status" value={params.status}
-              onChange={(event) => update({ status: event.target.value })}>
-              <option value="">All statuses</option>
-              {STATUSES.map((status) => (
-                <option key={status} value={status}>{humanise(status)}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <label htmlFor="hearing-court" className="sr-only">Filter by court</label>
-            <Select id="hearing-court" value={params.courtId}
-              onChange={(event) => update({ courtId: event.target.value })}>
-              <option value="">All courts</option>
-              {courts.data?.items.map((court) => (
-                <option key={court.id} value={court.id}>{court.name}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <label htmlFor="hearing-from" className="block text-xs text-ink-500">From</label>
-            <Input id="hearing-from" type="date" value={params.from}
-              onChange={(event) => update({ from: event.target.value })} />
-          </div>
-          <div>
-            <label htmlFor="hearing-to" className="block text-xs text-ink-500">To</label>
-            <Input id="hearing-to" type="date" value={params.to}
-              onChange={(event) => update({ to: event.target.value })} />
-          </div>
-        </div>
+        <Toolbar>
+          <Field label="Status" srOnlyLabel>
+            {({ id }) => (
+              <Select id={id} value={params.status} aria-label="Filter by status"
+                onChange={(event) => update({ status: event.target.value })}>
+                <option value="">All statuses</option>
+                {STATUSES.map((status) => (
+                  <option key={status} value={status}>{humanise(status)}</option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="Court" srOnlyLabel>
+            {({ id }) => (
+              <Select id={id} value={params.courtId} aria-label="Filter by court"
+                onChange={(event) => update({ courtId: event.target.value })}>
+                <option value="">All courts</option>
+                {courts.data?.items.map((court) => (
+                  <option key={court.id} value={court.id}>{court.name}</option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="From">
+            {({ id }) => (
+              <Input id={id} type="date" value={params.from}
+                onChange={(event) => update({ from: event.target.value })} />
+            )}
+          </Field>
+          <Field label="To">
+            {({ id }) => (
+              <Input id={id} type="date" value={params.to}
+                onChange={(event) => update({ to: event.target.value })} />
+            )}
+          </Field>
+          <Button variant="ghost" size="sm"
+            onClick={() => update({ status: '', courtId: '', from: '', to: '' })}>
+            Clear filters
+          </Button>
+        </Toolbar>
 
         <AsyncSection
           isLoading={query.isPending}
@@ -101,6 +112,7 @@ export function HearingListPage() {
           skeleton={<TableSkeleton columns={5} />}
           empty={(
             <EmptyState
+              icon="calendar"
               title="Nothing listed"
               description="No hearing matches these filters. Hearings are scheduled from a matter."
             />
@@ -121,7 +133,7 @@ export function HearingListPage() {
                         <span className="block font-medium text-ink-900">
                           {formatDateTime(hearing.scheduledAt)}
                         </span>
-                        <span className="block text-xs text-ink-500">
+                        <span className="mt-0.5 block text-xs text-ink-500">
                           {formatRelative(hearing.scheduledAt)}
                         </span>
                       </span>
@@ -129,7 +141,11 @@ export function HearingListPage() {
                   },
                   {
                     key: 'case', header: 'Matter',
-                    cell: (hearing: Hearing) => caseLabel(hearing.caseId),
+                    cell: (hearing: Hearing) => (
+                      <span className="font-mono text-xs text-ink-700">
+                        {caseLabel(hearing.caseId)}
+                      </span>
+                    ),
                   },
                   {
                     key: 'court', header: 'Court',

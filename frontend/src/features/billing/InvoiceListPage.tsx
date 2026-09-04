@@ -7,12 +7,12 @@ import { useListParams } from '@/lib/api/hooks';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Button, Card, Select } from '@/components/ui/primitives';
+import { Button, Card, Field, Select, Toolbar } from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
 import { DataTable } from '@/components/ui/DataTable';
 import { Pagination } from '@/components/ui/Pagination';
 import { InvoiceStatusBadge } from '@/components/ui/StatusBadge';
-import { formatDate, formatMoney } from '@/lib/format';
+import { formatDate, formatMoney, humanise, isPast } from '@/lib/format';
 import type { Invoice, InvoiceStatus } from '@/types/api';
 
 const STATUSES: InvoiceStatus[] = [
@@ -45,39 +45,45 @@ export function InvoiceListPage() {
     <>
       <PageHeader
         title="Invoices"
-        description="What the firm has billed and what is still owed."
+        description="What the firm has billed and what is still owed. Every figure is calculated by the server."
         actions={can(user?.role, 'draftInvoices') && (
-          <Button onClick={() => navigate('/invoices/new')}>New invoice</Button>
+          <Button icon="plus" onClick={() => navigate('/invoices/new')}>New invoice</Button>
         )}
       />
 
       <Card>
-        <div className="flex flex-wrap gap-3 border-b border-ink-200 p-3">
-          <div>
-            <label htmlFor="invoice-status" className="sr-only">Filter by status</label>
-            <Select id="invoice-status" value={params.status}
-              onChange={(event) => update({ status: event.target.value })}>
-              <option value="">All statuses</option>
-              {STATUSES.map((status) => (
-                <option key={status} value={status}>
-                  {status.charAt(0) + status.slice(1).toLowerCase().replace('_', ' ')}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {clients.data && (
-            <div>
-              <label htmlFor="invoice-client" className="sr-only">Filter by client</label>
-              <Select id="invoice-client" value={params.clientId}
-                onChange={(event) => update({ clientId: event.target.value })}>
-                <option value="">All clients</option>
-                {clients.data.items.map((client) => (
-                  <option key={client.id} value={client.id}>{client.displayName}</option>
+        <Toolbar>
+          <Field label="Status" srOnlyLabel>
+            {({ id }) => (
+              <Select id={id} value={params.status} aria-label="Filter by status"
+                onChange={(event) => update({ status: event.target.value })}>
+                <option value="">All statuses</option>
+                {STATUSES.map((status) => (
+                  <option key={status} value={status}>{humanise(status)}</option>
                 ))}
               </Select>
-            </div>
+            )}
+          </Field>
+          {clients.data && (
+            <Field label="Client" srOnlyLabel>
+              {({ id }) => (
+                <Select id={id} value={params.clientId} aria-label="Filter by client"
+                  onChange={(event) => update({ clientId: event.target.value })}>
+                  <option value="">All clients</option>
+                  {clients.data.items.map((client) => (
+                    <option key={client.id} value={client.id}>{client.displayName}</option>
+                  ))}
+                </Select>
+              )}
+            </Field>
           )}
-        </div>
+          {(params.status || params.clientId) && (
+            <Button variant="ghost" size="sm"
+              onClick={() => update({ status: '', clientId: '' })}>
+              Clear filters
+            </Button>
+          )}
+        </Toolbar>
 
         <AsyncSection
           isLoading={query.isPending}
@@ -88,6 +94,7 @@ export function InvoiceListPage() {
           skeleton={<TableSkeleton columns={6} />}
           empty={(
             <EmptyState
+              icon="invoices"
               title="No invoices found"
               description={params.status || params.clientId
                 ? 'Try widening the filters.'
@@ -106,7 +113,9 @@ export function InvoiceListPage() {
                   {
                     key: 'number', header: 'Invoice', primary: true,
                     cell: (invoice: Invoice) => (
-                      <span className="font-medium text-ink-900">{invoice.invoiceNumber}</span>
+                      <span className="font-mono font-medium text-ink-900">
+                        {invoice.invoiceNumber}
+                      </span>
                     ),
                   },
                   {
@@ -119,24 +128,42 @@ export function InvoiceListPage() {
                   },
                   {
                     key: 'issued', header: 'Issued',
-                    cell: (invoice: Invoice) => formatDate(invoice.issueDate),
+                    cell: (invoice: Invoice) => (
+                      <span className="whitespace-nowrap text-ink-600">
+                        {formatDate(invoice.issueDate)}
+                      </span>
+                    ),
                   },
                   {
                     key: 'due', header: 'Due',
-                    cell: (invoice: Invoice) => formatDate(invoice.dueDate),
+                    cell: (invoice: Invoice) => {
+                      const late = invoice.status === 'OVERDUE'
+                        || (invoice.dueDate ? isPast(invoice.dueDate) && invoice.amountDue !== '0.00' : false);
+                      return (
+                        <span className={late ? 'font-medium text-red-700' : 'text-ink-600'}>
+                          {formatDate(invoice.dueDate)}
+                        </span>
+                      );
+                    },
                   },
                   {
-                    key: 'total', header: 'Total',
-                    className: 'text-right tabular-nums',
-                    headerClassName: 'text-right',
-                    cell: (invoice: Invoice) => formatMoney(invoice.totalAmount, invoice.currency),
+                    key: 'total', header: 'Total', numeric: true,
+                    cell: (invoice: Invoice) => (
+                      <span className="text-ink-700">
+                        {formatMoney(invoice.totalAmount, invoice.currency)}
+                      </span>
+                    ),
                   },
                   {
-                    key: 'outstanding', header: 'Outstanding',
-                    className: 'text-right tabular-nums',
-                    headerClassName: 'text-right',
+                    key: 'outstanding', header: 'Outstanding', numeric: true,
                     // amountDue comes from the backend — the frontend never subtracts.
-                    cell: (invoice: Invoice) => formatMoney(invoice.amountDue, invoice.currency),
+                    cell: (invoice: Invoice) => (
+                      <span className={invoice.amountDue === '0.00'
+                        ? 'text-ink-500'
+                        : 'font-medium text-ink-900'}>
+                        {formatMoney(invoice.amountDue, invoice.currency)}
+                      </span>
+                    ),
                   },
                 ]}
               />

@@ -23,6 +23,12 @@ afterEach(() => {
 
 afterAll(() => server.close());
 
+// jsdom has no layout, so it implements no scrolling either. The tab strip scrolls its
+// selected tab into view on a narrow screen; here that is a no-op rather than a crash.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = function scrollIntoView() { /* no layout in jsdom */ };
+}
+
 // jsdom implements neither of these, and the modal and the toast both need them.
 if (!HTMLDialogElement.prototype.showModal) {
   HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {

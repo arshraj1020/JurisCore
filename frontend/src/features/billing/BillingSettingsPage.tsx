@@ -8,7 +8,9 @@ import { keys } from '@/lib/api/queryKeys';
 import { useUnsavedChangesWarning } from '@/lib/api/hooks';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Button, Card, CardHeader, Field, Input, Textarea } from '@/components/ui/primitives';
+import {
+  Alert, Button, Card, CardHeader, Field, Input, Textarea,
+} from '@/components/ui/primitives';
 import { ErrorState, TableSkeleton } from '@/components/ui/states';
 import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
 
@@ -124,14 +126,11 @@ export function BillingSettingsPage() {
         <Card><ErrorState error={query.error} onRetry={() => query.refetch()} /></Card>
       ) : (
         <form onSubmit={submit} noValidate className="space-y-4">
-          {errors.root && (
-            <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-              {errors.root.message}
-            </div>
-          )}
+          {errors.root && <Alert tone="danger" live>{errors.root.message}</Alert>}
 
           <Card>
-            <CardHeader title="The firm" description="How the firm is identified on an invoice." />
+            <CardHeader title="The firm" icon="courts"
+              description="How the firm is identified on an invoice." />
             <div className="grid gap-4 p-4 sm:grid-cols-2">
               <Field label="Legal name" error={errors.legalName?.message}>
                 {({ id, describedBy, invalid }) => (
@@ -162,7 +161,7 @@ export function BillingSettingsPage() {
           </Card>
 
           <Card>
-            <CardHeader title="Address" />
+            <CardHeader title="Address" icon="clients" />
             <div className="grid gap-4 p-4 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <Field label="Address line 1" error={errors.addressLine1?.message}>
@@ -210,6 +209,7 @@ export function BillingSettingsPage() {
           <Card>
             <CardHeader
               title="Invoice defaults"
+              icon="invoices"
               description="Applied to new invoices; existing invoices keep what they were raised with."
             />
             <div className="grid gap-4 p-4 sm:grid-cols-2">
@@ -238,7 +238,8 @@ export function BillingSettingsPage() {
             </div>
           </Card>
 
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-3 pb-2">
+            {isDirty && <p className="text-xs text-ink-500">You have unsaved changes.</p>}
             <Button type="submit" loading={isSubmitting} disabled={!isDirty}>Save</Button>
           </div>
         </form>

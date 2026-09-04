@@ -4,7 +4,9 @@ import { casesApi } from '../api';
 import { usersApi } from '@/features/auth/api';
 import { keys } from '@/lib/api/queryKeys';
 import { useToast } from '@/components/ui/Toast';
-import { Badge, Button, Card, CardHeader, Field, Textarea } from '@/components/ui/primitives';
+import {
+  Avatar, Badge, Button, Card, CardHeader, Field, Textarea,
+} from '@/components/ui/primitives';
 import type { Tone } from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
 import { Pagination } from '@/components/ui/Pagination';
@@ -68,7 +70,7 @@ export function CaseTimelineTab({ caseId }: { caseId: string }) {
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader title="Add a note"
+        <CardHeader title="Add a note" icon="edit"
           description="Notes join the matter's history alongside hearings, tasks and documents." />
         <form
           className="space-y-3 p-4"
@@ -93,7 +95,8 @@ export function CaseTimelineTab({ caseId }: { caseId: string }) {
       </Card>
 
       <Card>
-        <CardHeader title="History" description="Newest first. The timeline is append-only." />
+        <CardHeader title="History" icon="clock"
+          description="Newest first. The timeline is append-only." />
         <AsyncSection
           isLoading={query.isPending}
           error={query.error}
@@ -101,22 +104,39 @@ export function CaseTimelineTab({ caseId }: { caseId: string }) {
           isEmpty={(data) => data.items.length === 0}
           onRetry={() => query.refetch()}
           skeleton={<TableSkeleton rows={4} columns={2} />}
-          empty={<EmptyState title="Nothing recorded yet" />}
+          empty={<EmptyState compact icon="clock" title="Nothing recorded yet"
+            description="Everything that happens on this matter is written here." />}
         >
           {(data) => (
             <>
-              <ol className="divide-y divide-ink-100">
-                {data.items.map((event) => (
-                  <li key={event.id} className="px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone={TONE[event.eventType] ?? 'neutral'}>
-                        {humanise(event.eventType)}
-                      </Badge>
-                      <span className="text-xs text-ink-500">
-                        {formatDateTime(event.occurredAt)} · {actorName(event.actorUserId)}
-                      </span>
+              {/* A real timeline: one rail down the left, a node per entry. The rail is
+                  drawn on the list item so it stops at the last entry rather than running
+                  into the pagination row. */}
+              <ol className="px-4 py-3">
+                {data.items.map((event, index) => (
+                  <li key={event.id} className="relative flex gap-3 pb-4 last:pb-0">
+                    {index < data.items.length - 1 && (
+                      <span aria-hidden="true"
+                        className="absolute bottom-0 left-[0.4375rem] top-5 w-px bg-ink-200" />
+                    )}
+                    <span aria-hidden="true"
+                      className="relative mt-1.5 h-3.5 w-3.5 shrink-0 rounded-full border-2 border-white bg-ink-300 ring-1 ring-ink-200" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone={TONE[event.eventType] ?? 'neutral'}>
+                          {humanise(event.eventType)}
+                        </Badge>
+                        <span className="text-xs text-ink-500">
+                          {formatDateTime(event.occurredAt)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-sm text-ink-800">{event.summary}</p>
+                      <p className="mt-1 flex items-center gap-1.5 text-xs text-ink-500">
+                        <Avatar name={actorName(event.actorUserId)} size="sm"
+                          className="h-4 w-4 text-[9px]" />
+                        {actorName(event.actorUserId)}
+                      </p>
                     </div>
-                    <p className="mt-1 text-sm text-ink-800">{event.summary}</p>
                   </li>
                 ))}
               </ol>

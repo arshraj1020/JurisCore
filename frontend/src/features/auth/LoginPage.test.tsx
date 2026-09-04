@@ -39,7 +39,7 @@ describe('LoginPage', () => {
     );
 
     await userEvent.type(await screen.findByLabelText(/Email address/), 'asha@example.test');
-    await userEvent.type(screen.getByLabelText(/Password/), 'correct horse battery');
+    await userEvent.type(screen.getByLabelText(/^Password/), 'correct horse battery');
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
@@ -56,7 +56,7 @@ describe('LoginPage', () => {
     renderWithAuth(<LoginPage />);
 
     await userEvent.type(await screen.findByLabelText(/Email address/), 'asha@example.test');
-    await userEvent.type(screen.getByLabelText(/Password/), 'wrong');
+    await userEvent.type(screen.getByLabelText(/^Password/), 'wrong');
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     const alert = await screen.findByRole('alert');

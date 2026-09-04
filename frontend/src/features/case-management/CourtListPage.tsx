@@ -10,7 +10,9 @@ import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Badge, Button, Card, Field, Input, Select } from '@/components/ui/primitives';
+import {
+  Badge, Button, Card, Field, Input, Select, Toolbar,
+} from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
 import { DataTable } from '@/components/ui/DataTable';
 import { ConfirmDialog, Dialog } from '@/components/ui/Dialog';
@@ -64,22 +66,24 @@ export function CourtListPage() {
     <>
       <PageHeader
         title="Courts"
-        description="Venues hearings can be listed at."
-        actions={mayManage && <Button onClick={() => setEditing('new')}>Add court</Button>}
+        description="Venues hearings can be listed at. Retiring one keeps it on past hearings."
+        actions={mayManage && (
+          <Button icon="plus" onClick={() => setEditing('new')}>Add court</Button>
+        )}
       />
 
       <Card>
-        <div className="flex flex-wrap items-center gap-3 border-b border-ink-200 p-3">
-          <label className="flex items-center gap-2 text-sm text-ink-700">
+        <Toolbar className="items-center">
+          <label className="flex cursor-pointer items-center gap-2 py-1.5 text-sm text-ink-700">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+              className="h-4 w-4 cursor-pointer rounded border-ink-300 text-brand-600 focus:ring-brand-500"
               checked={includeRetired}
               onChange={(event) => update({ includeRetired: event.target.checked ? 'true' : '' })}
             />
             Show retired courts
           </label>
-        </div>
+        </Toolbar>
 
         <AsyncSection
           isLoading={query.isPending}
@@ -90,6 +94,7 @@ export function CourtListPage() {
           skeleton={<TableSkeleton columns={4} />}
           empty={(
             <EmptyState
+              icon="courts"
               title="No courts"
               description={mayManage
                 ? 'Add the courts your matters are listed at so hearings can reference them.'
@@ -109,7 +114,7 @@ export function CourtListPage() {
                     cell: (court: Court) => (
                       <span className="flex flex-wrap items-center gap-2">
                         <span className="font-medium text-ink-900">{court.name}</span>
-                        {!court.active && <Badge tone="neutral">Retired</Badge>}
+                        {!court.active && <Badge tone="neutral" dot>Retired</Badge>}
                       </span>
                     ),
                   },
@@ -123,10 +128,10 @@ export function CourtListPage() {
                       [court.city, court.state, court.country].filter(Boolean).join(', ') || '—',
                   },
                   ...(mayManage ? [{
-                    key: 'actions', header: 'Actions',
+                    key: 'actions', header: 'Actions', numeric: true,
                     cell: (court: Court) => (
-                      <span className="flex flex-wrap gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => setEditing(court)}>
+                      <span className="flex flex-wrap justify-end gap-1">
+                        <Button size="sm" variant="secondary" onClick={() => setEditing(court)}>
                           Edit
                         </Button>
                         {mayRetire && court.active && (
@@ -224,7 +229,11 @@ function CourtDialog({ court, onClose, onSaved }: {
   });
 
   return (
-    <Dialog open onClose={onClose} title={court ? 'Edit court' : 'Add a court'} footer={<span />}>
+    <Dialog
+      open onClose={onClose} title={court ? 'Edit court' : 'Add a court'}
+      description="Only the name and type are required; the address helps people find it."
+      footer={<span />}
+    >
       <form onSubmit={submit} noValidate className="space-y-4">
         {errors.root && (
           <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">

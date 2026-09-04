@@ -8,7 +8,10 @@ import { useAuth } from '@/lib/auth/AuthContext';
 import { isFirmStaff } from '@/lib/auth/roles';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Badge, Button, Card, CardHeader, Field, Input } from '@/components/ui/primitives';
+import {
+  Alert, Avatar, Badge, Button, Card, CardHeader, Detail, DetailList, Field, Input,
+  PasswordInput,
+} from '@/components/ui/primitives';
 import { formatDateTime, humanise } from '@/lib/format';
 import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
 
@@ -104,40 +107,34 @@ export function ProfilePage() {
 
       <div className="space-y-4">
         <Card>
-          <CardHeader title="Account" />
-          <dl className="grid gap-x-6 gap-y-3 p-4 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-ink-500">Email</dt>
-              <dd className="mt-0.5 text-ink-900">{user?.email}</dd>
+          <CardHeader title="Account" icon="user" />
+          <div className="flex items-center gap-3 border-b border-ink-100 px-4 py-3">
+            <Avatar name={user?.fullName ?? ''} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-ink-900">{user?.fullName}</p>
+              <p className="truncate text-xs text-ink-500">{user?.email}</p>
             </div>
-            <div>
-              <dt className="text-xs uppercase tracking-wide text-ink-500">Role</dt>
-              <dd className="mt-0.5">
-                <Badge tone="info">{humanise(user?.role ?? '')}</Badge>
-              </dd>
-            </div>
+          </div>
+          <DetailList columns={3}>
+            <Detail label="Role">
+              <Badge tone="info" dot>{humanise(user?.role ?? '')}</Badge>
+            </Detail>
             {organization.data && (
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-ink-500">Firm</dt>
-                <dd className="mt-0.5 text-ink-900">{organization.data.name}</dd>
-              </div>
+              <Detail label="Firm">{organization.data.name}</Detail>
             )}
-            {user?.lastLoginAt && (
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-ink-500">Last signed in</dt>
-                <dd className="mt-0.5 text-ink-900">{formatDateTime(user.lastLoginAt)}</dd>
-              </div>
-            )}
-          </dl>
+            <Detail label="Last signed in">
+              {user?.lastLoginAt
+                ? formatDateTime(user.lastLoginAt)
+                : <span className="text-ink-500">This is your first session</span>}
+            </Detail>
+          </DetailList>
         </Card>
 
         <Card>
-          <CardHeader title="Your details" />
+          <CardHeader title="Your details" icon="edit" />
           <form onSubmit={submitProfile} noValidate className="space-y-4 p-4">
             {profileForm.formState.errors.root && (
-              <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-                {profileForm.formState.errors.root.message}
-              </div>
+              <Alert tone="danger" live>{profileForm.formState.errors.root.message}</Alert>
             )}
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="First name" required
@@ -170,18 +167,17 @@ export function ProfilePage() {
         <Card>
           <CardHeader
             title="Password"
+            icon="settings"
             description="Changing your password does not sign out your other sessions."
           />
           <form onSubmit={submitPassword} noValidate className="space-y-4 p-4">
             {passwordForm.formState.errors.root && (
-              <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-                {passwordForm.formState.errors.root.message}
-              </div>
+              <Alert tone="danger" live>{passwordForm.formState.errors.root.message}</Alert>
             )}
             <Field label="Current password" required
               error={passwordForm.formState.errors.currentPassword?.message}>
               {({ id, describedBy, invalid }) => (
-                <Input id={id} type="password" autoComplete="current-password"
+                <PasswordInput id={id} autoComplete="current-password"
                   aria-describedby={describedBy} invalid={invalid}
                   {...passwordForm.register('currentPassword')} />
               )}
@@ -191,7 +187,7 @@ export function ProfilePage() {
                 hint="At least 12 characters."
                 error={passwordForm.formState.errors.newPassword?.message}>
                 {({ id, describedBy, invalid }) => (
-                  <Input id={id} type="password" autoComplete="new-password"
+                  <PasswordInput id={id} autoComplete="new-password"
                     aria-describedby={describedBy} invalid={invalid}
                     {...passwordForm.register('newPassword')} />
                 )}
@@ -199,7 +195,7 @@ export function ProfilePage() {
               <Field label="Confirm new password" required
                 error={passwordForm.formState.errors.confirmPassword?.message}>
                 {({ id, describedBy, invalid }) => (
-                  <Input id={id} type="password" autoComplete="new-password"
+                  <PasswordInput id={id} autoComplete="new-password"
                     aria-describedby={describedBy} invalid={invalid}
                     {...passwordForm.register('confirmPassword')} />
                 )}

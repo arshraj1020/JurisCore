@@ -1,8 +1,10 @@
 import type { Permission } from '@/lib/auth/roles';
+import type { IconName } from '@/components/ui/icons';
 
 export interface NavItem {
   to: string;
   label: string;
+  icon: IconName;
   /** Omitted for items every signed-in firm user can reach. */
   permission?: Permission;
 }
@@ -23,26 +25,29 @@ export const NAVIGATION: NavSection[] = [
   {
     label: 'Practice',
     items: [
-      { to: '/', label: 'Dashboard' },
-      { to: '/clients', label: 'Clients', permission: 'viewCasework' },
-      { to: '/cases', label: 'Matters', permission: 'viewCasework' },
-      { to: '/hearings', label: 'Hearings', permission: 'viewCasework' },
-      { to: '/courts', label: 'Courts', permission: 'viewCasework' },
+      { to: '/', label: 'Dashboard', icon: 'dashboard' },
+      { to: '/clients', label: 'Clients', icon: 'clients', permission: 'viewCasework' },
+      { to: '/cases', label: 'Matters', icon: 'cases', permission: 'viewCasework' },
+      { to: '/hearings', label: 'Hearings', icon: 'hearings', permission: 'viewCasework' },
+      { to: '/courts', label: 'Courts', icon: 'courts', permission: 'viewCasework' },
     ],
   },
   {
     label: 'Billing',
     items: [
-      { to: '/invoices', label: 'Invoices', permission: 'viewBilling' },
-      { to: '/billing/settings', label: 'Billing settings', permission: 'viewBillingSettings' },
+      { to: '/invoices', label: 'Invoices', icon: 'invoices', permission: 'viewBilling' },
+      {
+        to: '/billing/settings', label: 'Billing settings', icon: 'settings',
+        permission: 'viewBillingSettings',
+      },
     ],
   },
   {
     label: 'Firm',
     items: [
-      { to: '/notifications', label: 'Notifications' },
-      { to: '/members', label: 'Members', permission: 'viewMembers' },
-      { to: '/audit', label: 'Audit trail', permission: 'viewAudit' },
+      { to: '/notifications', label: 'Notifications', icon: 'bell' },
+      { to: '/members', label: 'People', icon: 'people', permission: 'viewMembers' },
+      { to: '/audit', label: 'Audit trail', icon: 'audit', permission: 'viewAudit' },
     ],
   },
 ];

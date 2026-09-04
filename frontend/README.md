@@ -26,16 +26,46 @@ in `juriscore-app`, or the Docker Compose stack) and sign in.
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run verify` | typecheck → lint → test → build. This is the gate. |
 
+Two further checks live in `scripts/` and are deliberately outside `verify`, because they
+need a browser that is not a project dependency. Install one with
+`npm i --no-save playwright && npx playwright install chromium` (or point `CHROMIUM_PATH`
+at one you already have), then:
+
+```bash
+npm run build
+node scripts/shots.mjs            # screenshots every page at 390 / 834 / 1280 / 1680 into .shots/
+node scripts/a11y.mjs             # accessible names, labels, heading order, duplicate ids, contrast
+```
+
+`scripts/fixtures.mjs` holds the sample firm both scripts render against.
+
 Configuration is one variable, documented in `.env.example`. Only `VITE_`-prefixed
 variables reach the browser and everything that does is public — nothing secret belongs in
 that file.
+
+## The visual language
+
+Restrained on purpose. White and near-white surfaces, hairline borders rather than drop
+shadows, one desaturated indigo for the brand, and the status colours — green, amber, red
+— reserved for state so they are the loudest thing on a screen somebody looks at all day.
+No gradients, no glass, no hero sections, and one border radius.
+
+The palette lives in `tailwind.config.js`. Two rules about it are load-bearing: `ink-500`
+and `ink-600` are the only greys text is set in, both clearing 4.5:1 against every surface
+the interface puts them on; `ink-400` and lighter are for icons, dividers and placeholders
+and are never used for reading. `scripts/a11y.mjs` checks this, and it currently reports no
+failures across all twenty-three pages.
+
+Typography is the system stack — a webfont would be a network dependency for no gain here.
+Tables run at 13px with tight row padding because they are scanned for a matter number,
+not read; money and counts are `tabular-nums` wherever they are compared down a column.
 
 ## How it is laid out
 
 ```
 src/
   app/          shell, navigation, route guards
-  components/ui primitives, tables, dialogs, async states
+  components/ui primitives, icons, tabs, tables, dialogs, async states
   features/     one folder per domain area; each owns its api.ts and its pages
   lib/
     api/        the HTTP client, error model, query keys, list hooks
@@ -78,14 +108,24 @@ with no `Authorization` header, then tell the backend it landed. `CaseDocumentsT
 only place that does this, and an expired link restarts at registration rather than
 replaying a dead signature.
 
+**A table above `md`, records below it.** `DataTable` renders a real table on wide screens
+and a list of stacked records on narrow ones — not a table that shrinks, because a
+seven-column table at 375px is unusable however it is styled. Rows whose actions would
+squeeze the content give those actions their own line below `sm`.
+
+**Tabs follow the ARIA pattern.** Only the selected tab is in the tab order, arrow keys and
+Home/End move between them, and the selected tab scrolls itself into view on a narrow
+screen. That keyboard model is why `Tabs` is a component rather than a row of buttons.
+
 ## Tests
 
-65 tests across nine files, run with `npm test`. They cover the things that are actually
+80 tests across twelve files, run with `npm test`. They cover the things that are actually
 easy to get wrong: exact decimal arithmetic and HALF_UP rounding, the refresh single-flight
 under a burst of parallel 401s, the presigned upload contract including the absent
 Authorization header and the expired-link retry, lifecycle and role gating on the invoice
 page, the auth redirect that must not fire while the session is still being restored, and
-the open-redirect check on notification action paths.
+the open-redirect check on notification action paths — plus the tab keyboard model and the
+form-field wiring that `Field` exists to guarantee.
 
 MSW backs every test with `onUnhandledRequest: 'error'`, so a request nobody wrote a
 handler for fails the suite rather than passing quietly for the wrong reason.

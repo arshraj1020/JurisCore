@@ -8,12 +8,16 @@ import { keys } from '@/lib/api/queryKeys';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import {
-  canCancelInvoice, canIssueInvoice, canRecordPayment, isInvoiceEditable,
+  canCancelInvoice, canIssueInvoice, canRecordPayment, hasOutstanding, isInvoiceEditable,
 } from '@/lib/lifecycle';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Button, Card, CardHeader, Field, Input, Select, Textarea } from '@/components/ui/primitives';
-import { AsyncSection, ErrorState, TableSkeleton } from '@/components/ui/states';
+import {
+  Alert, Badge, Button, Card, CardHeader, Detail, DetailList, Field, Input, Select, Textarea,
+} from '@/components/ui/primitives';
+import { Icon } from '@/components/ui/icons';
+import { cn } from '@/lib/cn';
+import { AsyncSection, EmptyState, ErrorState, TableSkeleton } from '@/components/ui/states';
 import { Dialog } from '@/components/ui/Dialog';
 import { InvoiceStatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate, formatDateTime, formatMoney, formatPercent, formatQuantity, humanise } from '@/lib/format';
@@ -77,28 +81,30 @@ export function InvoiceDetailPage() {
   return (
     <>
       <PageHeader
-        title={invoice ? invoice.invoiceNumber : 'Invoice'}
+        title={<span className="font-mono">{invoice ? invoice.invoiceNumber : 'Invoice'}</span>}
+        meta={invoice && <InvoiceStatusBadge status={invoice.status} />}
         description={invoice ? `Raised ${formatDate(invoice.createdAt)}` : undefined}
         breadcrumbs={[
           { label: 'Invoices', to: '/invoices' },
           { label: invoice?.invoiceNumber ?? 'Invoice' },
         ]}
         actions={invoice && (
-          <div className="flex flex-wrap items-center gap-2">
-            <InvoiceStatusBadge status={invoice.status} />
+          <>
             {mayDraft && isInvoiceEditable(invoice.status) && (
-              <Button variant="secondary" onClick={() => setDialog('edit')}>Edit draft</Button>
+              <Button variant="secondary" icon="edit" onClick={() => setDialog('edit')}>
+                Edit draft
+              </Button>
+            )}
+            {mayAdminister && canCancelInvoice(invoice.status) && (
+              <Button variant="secondary" onClick={() => setDialog('cancel')}>Cancel</Button>
             )}
             {mayAdminister && canIssueInvoice(invoice.status) && (
               <Button onClick={() => setDialog('issue')}>Issue</Button>
             )}
             {mayAdminister && canRecordPayment(invoice.status) && (
-              <Button onClick={() => setDialog('payment')}>Record payment</Button>
+              <Button icon="money" onClick={() => setDialog('payment')}>Record payment</Button>
             )}
-            {mayAdminister && canCancelInvoice(invoice.status) && (
-              <Button variant="danger" onClick={() => setDialog('cancel')}>Cancel</Button>
-            )}
-          </div>
+          </>
         )}
       />
 
@@ -106,142 +112,156 @@ export function InvoiceDetailPage() {
         <Card><TableSkeleton rows={5} columns={4} /></Card>
       ) : (
         <div className="space-y-4">
+          {invoice.status === 'DRAFT' && (
+            <Alert tone="warning" title="This invoice is a draft">
+              It has not been issued, so nobody has been asked to pay it. Issuing freezes the
+              figures and is one-way.
+            </Alert>
+          )}
+          {invoice.status === 'OVERDUE' && (
+            <Alert tone="danger" title="This invoice is overdue">
+              It was due on {formatDate(invoice.dueDate)} and{' '}
+              {formatMoney(invoice.amountDue, invoice.currency)} is still outstanding.
+            </Alert>
+          )}
+          {invoice.status === 'CANCELLED' && (
+            <Alert tone="neutral" title="This invoice was cancelled">
+              It stays on record as withdrawn. Correcting it means raising a new invoice.
+            </Alert>
+          )}
+
           <Card>
-            <CardHeader title="Details" />
-            <dl className="grid gap-x-6 gap-y-3 p-4 text-sm sm:grid-cols-2">
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-ink-500">Client</dt>
-                <dd className="mt-0.5 text-ink-900">
-                  {can(user?.role, 'viewCasework') ? (
-                    <Link to={`/clients/${invoice.clientId}`} className="text-brand-700 hover:underline">
-                      {client.data?.displayName ?? 'View client'}
+            <CardHeader title="Details" icon="info" />
+            <DetailList columns={3}>
+              <Detail label="Client">
+                {can(user?.role, 'viewCasework') ? (
+                  <Link to={`/clients/${invoice.clientId}`}
+                    className="font-medium text-brand-700 hover:underline">
+                    {client.data?.displayName ?? 'View client'}
+                  </Link>
+                ) : (client.data?.displayName ?? '—')}
+              </Detail>
+              <Detail label="Matter">
+                {invoice.caseId ? (
+                  can(user?.role, 'viewCasework') ? (
+                    <Link to={`/cases/${invoice.caseId}`}
+                      className="font-mono font-medium text-brand-700 hover:underline">
+                      {legalCase.data?.caseNumber ?? 'View matter'}
                     </Link>
-                  ) : (client.data?.displayName ?? '—')}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-ink-500">Matter</dt>
-                <dd className="mt-0.5 text-ink-900">
-                  {invoice.caseId ? (
-                    can(user?.role, 'viewCasework') ? (
-                      <Link to={`/cases/${invoice.caseId}`} className="text-brand-700 hover:underline">
-                        {legalCase.data?.caseNumber ?? 'View matter'}
-                      </Link>
-                    ) : (legalCase.data?.caseNumber ?? '—')
-                  ) : 'Not tied to a matter'}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-ink-500">Issue date</dt>
-                <dd className="mt-0.5 text-ink-900">{formatDate(invoice.issueDate)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs uppercase tracking-wide text-ink-500">Due date</dt>
-                <dd className="mt-0.5 text-ink-900">{formatDate(invoice.dueDate)}</dd>
-              </div>
+                  ) : (legalCase.data?.caseNumber ?? '—')
+                ) : <span className="text-ink-500">Not tied to a matter</span>}
+              </Detail>
+              <Detail label="Currency">{invoice.currency}</Detail>
+              <Detail label="Issue date">
+                {invoice.issueDate
+                  ? formatDate(invoice.issueDate)
+                  : <span className="text-ink-500">Not set</span>}
+              </Detail>
+              <Detail label="Due date">
+                {invoice.dueDate
+                  ? formatDate(invoice.dueDate)
+                  : <span className="text-ink-500">Not set</span>}
+              </Detail>
               {invoice.paidAt && (
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-ink-500">Settled</dt>
-                  <dd className="mt-0.5 text-ink-900">{formatDateTime(invoice.paidAt)}</dd>
-                </div>
+                <Detail label="Settled">{formatDateTime(invoice.paidAt)}</Detail>
               )}
               {invoice.cancelledAt && (
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-ink-500">Cancelled</dt>
-                  <dd className="mt-0.5 text-ink-900">{formatDateTime(invoice.cancelledAt)}</dd>
-                </div>
+                <Detail label="Cancelled">{formatDateTime(invoice.cancelledAt)}</Detail>
               )}
               {invoice.notes && (
-                <div className="sm:col-span-2">
-                  <dt className="text-xs uppercase tracking-wide text-ink-500">Notes</dt>
-                  <dd className="mt-0.5 whitespace-pre-wrap text-ink-800">{invoice.notes}</dd>
-                </div>
+                <Detail label="Notes" className="sm:col-span-2 lg:col-span-3">
+                  <span className="whitespace-pre-wrap text-ink-700">{invoice.notes}</span>
+                </Detail>
               )}
-            </dl>
+            </DetailList>
           </Card>
 
           <Card>
-            <CardHeader title="Lines" />
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-ink-200 text-sm">
+            <CardHeader title="Lines" icon="invoices"
+              description="Tax is applied per line, at the rate that line carries." />
+            <div className="scroll-x">
+              <table className="min-w-full text-sm">
                 <caption className="sr-only">Invoice lines</caption>
                 <thead>
-                  <tr className="bg-ink-50 text-xs uppercase tracking-wide text-ink-600">
-                    <th scope="col" className="px-4 py-2.5 text-left font-semibold">Description</th>
-                    <th scope="col" className="px-4 py-2.5 text-right font-semibold">Qty</th>
-                    <th scope="col" className="px-4 py-2.5 text-right font-semibold">Unit price</th>
-                    <th scope="col" className="px-4 py-2.5 text-right font-semibold">Amount</th>
-                    <th scope="col" className="px-4 py-2.5 text-right font-semibold">Tax</th>
+                  <tr className="border-b border-ink-200 bg-ink-50 text-2xs uppercase tracking-wide text-ink-500">
+                    <th scope="col" className="px-4 py-2 text-left font-semibold">Description</th>
+                    <th scope="col" className="px-4 py-2 text-right font-semibold">Qty</th>
+                    <th scope="col" className="px-4 py-2 text-right font-semibold">Unit price</th>
+                    <th scope="col" className="px-4 py-2 text-right font-semibold">Amount</th>
+                    <th scope="col" className="px-4 py-2 text-right font-semibold">Tax rate</th>
+                    <th scope="col" className="px-4 py-2 text-right font-semibold">Tax</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink-100">
-                  {(invoice.lineItems ?? []).map((line) => (
+                  {(invoice.lineItems ?? []).map((line, index) => (
                     <tr key={line.id}>
-                      <td className="px-4 py-3 text-ink-800">{line.description}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-ink-800">
+                      <td className="px-4 py-2.5 text-ink-800">
+                        <span className="mr-2 text-2xs tabular-nums text-ink-400">
+                          {index + 1}
+                        </span>
+                        {line.description}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-ink-700">
                         {formatQuantity(line.quantity)}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-ink-800">
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-ink-700">
                         {formatMoney(line.unitPrice, invoice.currency)}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-ink-800">
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right font-medium text-ink-900">
                         {formatMoney(line.amount, invoice.currency)}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-ink-800">
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-ink-500">
+                        {formatPercent(line.taxRate)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 text-right text-ink-700">
                         {formatMoney(line.taxAmount, invoice.currency)}
-                        <span className="ml-1 text-xs text-ink-500">
-                          ({formatPercent(line.taxRate)})
-                        </span>
                       </td>
                     </tr>
                   ))}
+                  {(invoice.lineItems ?? []).length === 0 && (
+                    <tr>
+                      <td colSpan={6}>
+                        <EmptyState compact icon="invoices" title="No lines"
+                          description="This invoice has no line items." />
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
 
-            {/* Every figure below is the server's. Nothing here is recomputed in the browser. */}
-            <dl className="space-y-1 border-t border-ink-200 p-4 text-sm">
-              <div className="flex justify-between">
-                <dt className="text-ink-600">Subtotal</dt>
-                <dd className="tabular-nums text-ink-900">
-                  {formatMoney(invoice.subtotal, invoice.currency)}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-ink-600">Tax</dt>
-                <dd className="tabular-nums text-ink-900">
-                  {formatMoney(invoice.taxAmount, invoice.currency)}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-ink-600">Discount</dt>
-                <dd className="tabular-nums text-ink-900">
-                  {formatMoney(invoice.discountAmount, invoice.currency)}
-                </dd>
-              </div>
-              <div className="flex justify-between border-t border-ink-200 pt-1 font-medium">
-                <dt className="text-ink-800">Total</dt>
-                <dd className="tabular-nums text-ink-900">
-                  {formatMoney(invoice.totalAmount, invoice.currency)}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-ink-600">Paid</dt>
-                <dd className="tabular-nums text-ink-900">
-                  {formatMoney(invoice.amountPaid, invoice.currency)}
-                </dd>
-              </div>
-              <div className="flex justify-between font-medium">
-                <dt className="text-ink-800">Outstanding</dt>
-                <dd className="tabular-nums text-ink-900">
-                  {formatMoney(invoice.amountDue, invoice.currency)}
-                </dd>
-              </div>
-            </dl>
+            {/* Every figure below is the server's. Nothing here is recomputed in the
+                browser — see the note in src/lib/money.ts about why that matters. */}
+            <div className="flex justify-end border-t border-ink-200 bg-ink-50/60 px-4 py-3">
+              <dl className="w-full max-w-xs space-y-1.5 text-sm">
+                <TotalRow label="Subtotal"
+                  value={formatMoney(invoice.subtotal, invoice.currency)} />
+                <TotalRow label="Tax" value={formatMoney(invoice.taxAmount, invoice.currency)} />
+                {invoice.discountAmount !== '0.00' && (
+                  <TotalRow label="Discount"
+                    value={`− ${formatMoney(invoice.discountAmount, invoice.currency)}`} />
+                )}
+                <TotalRow
+                  label="Total" strong
+                  className="border-t border-ink-300 pt-1.5"
+                  value={formatMoney(invoice.totalAmount, invoice.currency)}
+                />
+                <TotalRow label="Paid" value={formatMoney(invoice.amountPaid, invoice.currency)} />
+                <TotalRow
+                  label="Outstanding" strong
+                  alert={hasOutstanding(invoice.status) && invoice.amountDue !== '0.00'}
+                  className="border-t border-ink-200 pt-1.5"
+                  value={formatMoney(invoice.amountDue, invoice.currency)}
+                />
+              </dl>
+            </div>
           </Card>
 
           <Card>
-            <CardHeader title="Payments" description="Amounts received against this invoice." />
+            <CardHeader
+              title="Payments" icon="money"
+              description="Money already received. JurisCore records payments; it never takes one."
+            />
             <AsyncSection
               isLoading={payments.isPending}
               error={payments.error}
@@ -250,24 +270,32 @@ export function InvoiceDetailPage() {
               onRetry={() => payments.refetch()}
               skeleton={<TableSkeleton rows={2} columns={4} />}
               empty={(
-                <p className="px-4 py-6 text-center text-sm text-ink-600">
-                  Nothing has been received yet.
-                </p>
+                <EmptyState compact icon="money" title="Nothing received yet"
+                  description="Payments recorded against this invoice appear here." />
               )}
             >
               {(data) => (
                 <ul className="divide-y divide-ink-100">
                   {data.items.map((payment) => (
-                    <li key={payment.id} className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3">
-                      <div>
-                        <p className="text-sm font-medium text-ink-900">
-                          {formatMoney(payment.amount, payment.currency)}
-                        </p>
-                        <p className="text-xs text-ink-500">
-                          {formatDate(payment.paymentDate)}
-                          <span className="text-ink-400"> · </span>
-                          {humanise(payment.method)}
-                          {payment.reference && ` · ${payment.reference}`}
+                    <li key={payment.id} className="flex items-start gap-3 px-4 py-3">
+                      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-md bg-emerald-50 text-emerald-600">
+                        <Icon name="check" className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <p className="text-sm font-medium tabular-nums text-ink-900">
+                            {formatMoney(payment.amount, payment.currency)}
+                          </p>
+                          <Badge tone="neutral">{humanise(payment.method)}</Badge>
+                        </div>
+                        <p className="mt-0.5 text-xs text-ink-500">
+                          Received {formatDate(payment.paymentDate)}
+                          {payment.reference && (
+                            <>
+                              <span className="text-ink-300"> · </span>
+                              <span className="font-mono">{payment.reference}</span>
+                            </>
+                          )}
                         </p>
                         {payment.notes && (
                           <p className="mt-1 text-sm text-ink-600">{payment.notes}</p>
@@ -316,6 +344,29 @@ export function InvoiceDetailPage() {
         />
       )}
     </>
+  );
+}
+
+/** One row of the totals block, so the label/value alignment is identical down the list. */
+function TotalRow({ label, value, strong = false, alert = false, className }: {
+  label: string; value: string; strong?: boolean; alert?: boolean; className?: string;
+}) {
+  return (
+    <div className={cn('flex items-baseline justify-between gap-6', className)}>
+      <dt className={cn(
+        strong ? 'font-medium' : '',
+        alert ? 'text-red-800' : strong ? 'text-ink-800' : 'text-ink-600',
+      )}>
+        {label}
+      </dt>
+      <dd className={cn(
+        'tabular-nums',
+        strong ? 'font-semibold' : '',
+        alert ? 'text-red-700' : strong ? 'text-ink-900' : 'text-ink-800',
+      )}>
+        {value}
+      </dd>
+    </div>
   );
 }
 

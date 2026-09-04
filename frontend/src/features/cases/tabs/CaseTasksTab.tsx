@@ -100,6 +100,7 @@ export function CaseTasksTab({ caseId }: { caseId: string }) {
   return (
     <Card>
       <CardHeader
+        icon="check"
         title="Tasks"
         description="Work to be done on this matter."
         actions={
@@ -113,7 +114,7 @@ export function CaseTasksTab({ caseId }: { caseId: string }) {
               ))}
             </Select>
             {can(user?.role, 'manageCaseWork') && (
-              <Button size="sm" onClick={() => setCreating(true)}>Add task</Button>
+              <Button size="sm" icon="plus" onClick={() => setCreating(true)}>Add task</Button>
             )}
           </div>
         }
@@ -126,7 +127,7 @@ export function CaseTasksTab({ caseId }: { caseId: string }) {
         isEmpty={(data) => data.items.length === 0}
         onRetry={() => query.refetch()}
         skeleton={<TableSkeleton rows={3} columns={3} />}
-        empty={<EmptyState title="No tasks" description="Nothing is outstanding on this matter." />}
+        empty={<EmptyState compact icon="check" title="No tasks" description="Nothing is outstanding on this matter." />}
       >
         {(data) => (
           <ul className="divide-y divide-ink-100">
@@ -136,7 +137,7 @@ export function CaseTasksTab({ caseId }: { caseId: string }) {
                 && isPast(task.dueAt);
               return (
                 <li key={task.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 basis-full sm:flex-1 sm:basis-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-medium text-ink-900">{task.title}</span>
                       <TaskStatusBadge status={task.status} />
@@ -152,14 +153,14 @@ export function CaseTasksTab({ caseId }: { caseId: string }) {
                     </p>
                   </div>
                   {options.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex w-full flex-wrap gap-1 sm:w-auto sm:justify-end">
                       {options.map((next) => (
                         <Button
                           key={next} size="sm" variant="secondary"
                           disabled={changeStatus.isPending}
                           onClick={() => changeStatus.mutate({ taskId: task.id, next })}
                         >
-                          {humanise(next)}
+                          {next === 'TODO' ? 'Reopen' : `Mark ${humanise(next).toLowerCase()}`}
                         </Button>
                       ))}
                     </div>

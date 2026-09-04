@@ -6,19 +6,55 @@
   html {
     -webkit-text-size-adjust: 100%;
   }
+
   body {
-    @apply bg-ink-50 text-ink-900 antialiased;
+    @apply bg-ink-100 text-ink-900 antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
+
+  /* Headings carry the hierarchy, so they get the tighter tracking rather than every
+     element getting it and nothing standing out. */
+  h1, h2, h3 {
+    @apply tracking-[-0.011em];
+  }
+
   /* Keyboard focus must always be visible — several controls below restyle their
      default outline, and losing the ring entirely is the usual way that happens. */
   :focus-visible {
     @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-white;
+  }
+
+  /* Figures line up in columns wherever they are compared, which is most places money
+     and counts appear in this application. */
+  th, td, dd {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The native date and time pickers hand back a control that is a different height from
+     every other input unless it is told otherwise. */
+  input[type='date'],
+  input[type='datetime-local'] {
+    @apply min-h-[2.25rem];
+  }
+}
+
+@layer components {
+  /* The one place a scroll container's edges are softened, so a wide table reads as
+     continuing rather than as ending at the card's border. */
+  .scroll-x {
+    @apply overflow-x-auto;
+    scrollbar-width: thin;
   }
 }
 
 @layer utilities {
   .skeleton {
     @apply animate-pulse rounded bg-ink-200;
+  }
+
+  /* A hairline that survives on a dark surface as well as a light one. */
+  .divide-hairline > * + * {
+    @apply border-t border-ink-100;
   }
 }
 

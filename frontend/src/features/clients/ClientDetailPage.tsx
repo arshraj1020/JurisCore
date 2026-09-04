@@ -9,21 +9,15 @@ import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Badge, Button, Card, CardHeader } from '@/components/ui/primitives';
+import {
+  Avatar, Badge, Button, Card, CardHeader, Detail, DetailList,
+} from '@/components/ui/primitives';
+import { Icon } from '@/components/ui/icons';
 import { AsyncSection, EmptyState, ErrorState, TableSkeleton } from '@/components/ui/states';
 import { ConfirmDialog, Dialog } from '@/components/ui/Dialog';
 import { CaseStatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate, formatDateTime } from '@/lib/format';
 import { messageFor } from '@/lib/api/errors';
-
-function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="grid grid-cols-[9rem,1fr] gap-3 py-2 text-sm">
-      <dt className="text-ink-500">{label}</dt>
-      <dd className="text-ink-900">{value || '—'}</dd>
-    </div>
-  );
-}
 
 export function ClientDetailPage() {
   const { clientId = '' } = useParams();
@@ -66,66 +60,98 @@ export function ClientDetailPage() {
     onError: (error) => toast.error(messageFor(error)),
   });
 
-  if (query.isPending) return <TableSkeleton rows={6} />;
+  if (query.isPending) return <Card><TableSkeleton rows={6} /></Card>;
   if (query.error || !query.data) {
-    return <ErrorState error={query.error} onRetry={() => query.refetch()} />;
+    return <Card><ErrorState error={query.error} onRetry={() => query.refetch()} /></Card>;
   }
 
   const client = query.data;
   const mayManage = can(user?.role, 'manageClients');
   const mayDelete = can(user?.role, 'deleteClients');
+  const address = [
+    client.addressLine1, client.addressLine2,
+    [client.city, client.state].filter(Boolean).join(', '),
+    [client.postalCode, client.country].filter(Boolean).join(' '),
+  ].map((line) => line?.trim()).filter((line): line is string => !!line);
 
   return (
     <>
       <PageHeader
         breadcrumbs={[{ label: 'Clients', to: '/clients' }, { label: client.displayName }]}
-        title={client.displayName}
-        description={
-          <span className="flex items-center gap-2">
-            <Badge tone={client.clientType === 'CORPORATE' ? 'info' : 'neutral'}>
-              {client.clientType === 'CORPORATE' ? 'Corporate' : 'Individual'}
-            </Badge>
-            <span>Client since {formatDate(client.createdAt)}</span>
+        title={(
+          <span className="flex items-center gap-2.5">
+            <Avatar name={client.displayName} />
+            {client.displayName}
           </span>
-        }
+        )}
+        meta={(
+          <Badge tone={client.clientType === 'CORPORATE' ? 'info' : 'neutral'} dot>
+            {client.clientType === 'CORPORATE' ? 'Corporate' : 'Individual'}
+          </Badge>
+        )}
+        description={`Client since ${formatDate(client.createdAt)}`}
         actions={
           <>
             {mayManage && (
-              <Button variant="secondary" onClick={() => setEditing(true)}>Edit</Button>
+              <Button variant="secondary" icon="edit" onClick={() => setEditing(true)}>
+                Edit
+              </Button>
             )}
             {mayDelete && (
-              <Button variant="danger" onClick={() => setConfirmingDelete(true)}>Remove</Button>
+              <Button variant="secondary" icon="trash" onClick={() => setConfirmingDelete(true)}>
+                Remove
+              </Button>
             )}
           </>
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid items-start gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-1">
-          <CardHeader title="Details" />
-          <dl className="divide-y divide-ink-100 px-4 py-2">
-            <DetailRow label="Email" value={client.email} />
-            <DetailRow label="Phone" value={client.phone} />
-            <DetailRow label="Address" value={
-              [client.addressLine1, client.addressLine2, client.city, client.state,
-                client.postalCode, client.country].filter(Boolean).join(', ')
-            } />
-            <DetailRow label="Notes" value={client.notes} />
-            <DetailRow label="Last updated" value={formatDateTime(client.updatedAt)} />
-          </dl>
+          <CardHeader title="Contact details" icon="clients" />
+          <DetailList columns={2} className="sm:grid-cols-1">
+            <Detail label="Email">
+              {client.email
+                ? (
+                  <a href={`mailto:${client.email}`}
+                    className="inline-flex items-center gap-1 break-all text-brand-700 hover:underline">
+                    {client.email}
+                  </a>
+                )
+                : <span className="text-ink-500">Not recorded</span>}
+            </Detail>
+            <Detail label="Phone">
+              {client.phone ?? <span className="text-ink-500">Not recorded</span>}
+            </Detail>
+            <Detail label="Address">
+              {address.length > 0
+                ? <span className="whitespace-pre-line">{address.join('\n')}</span>
+                : <span className="text-ink-500">Not recorded</span>}
+            </Detail>
+            {client.notes && (
+              <Detail label="Notes">
+                <span className="whitespace-pre-wrap text-ink-700">{client.notes}</span>
+              </Detail>
+            )}
+            <Detail label="Last updated">
+              <span className="text-ink-600">{formatDateTime(client.updatedAt)}</span>
+            </Detail>
+          </DetailList>
         </Card>
 
         <Card className="lg:col-span-2">
           <CardHeader
             title="Matters"
+            icon="cases"
             description="Every matter opened for this client."
             actions={
               can(user?.role, 'createCases') && (
                 <Link
                   to={`/cases?clientId=${client.id}`}
-                  className="text-sm font-medium text-brand-700 hover:underline"
+                  className="inline-flex items-center gap-1 rounded text-xs font-medium text-brand-700 hover:underline"
                 >
                   Open a matter
+                  <Icon name="chevronRight" className="h-3 w-3" />
                 </Link>
               )
             }
@@ -137,7 +163,7 @@ export function ClientDetailPage() {
             isEmpty={(data) => data.items.length === 0}
             onRetry={() => casesQuery.refetch()}
             skeleton={<TableSkeleton rows={3} columns={3} />}
-            empty={<EmptyState title="No matters yet"
+            empty={<EmptyState compact icon="cases" title="No matters yet"
               description="Matters opened for this client will appear here." />}
           >
             {(data) => (
@@ -146,13 +172,15 @@ export function ClientDetailPage() {
                   <li key={legalCase.id}>
                     <Link
                       to={`/cases/${legalCase.id}`}
-                      className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 hover:bg-ink-50"
+                      className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 transition-colors hover:bg-brand-50/40"
                     >
                       <span className="min-w-0">
                         <span className="block truncate text-sm font-medium text-ink-900">
                           {legalCase.title}
                         </span>
-                        <span className="block text-xs text-ink-500">{legalCase.caseNumber}</span>
+                        <span className="mt-0.5 block font-mono text-xs text-ink-500">
+                          {legalCase.caseNumber}
+                        </span>
                       </span>
                       <CaseStatusBadge status={legalCase.status} />
                     </Link>

@@ -10,9 +10,11 @@ import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
-import { Badge, Button, Card, Field, Input, Select } from '@/components/ui/primitives';
-import type { Tone } from '@/components/ui/primitives';
+import {
+  Avatar, Badge, Button, Card, Field, Input, SearchInput, Select, Toolbar,
+} from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
+import { UserStatusBadge } from '@/components/ui/StatusBadge';
 import { DataTable } from '@/components/ui/DataTable';
 import { Dialog } from '@/components/ui/Dialog';
 import { Pagination } from '@/components/ui/Pagination';
@@ -23,16 +25,26 @@ import type { Role, User, UserStatus } from '@/types/api';
 /** Roles a firm administrator can hand out. SUPER_ADMIN is not one of them. */
 const ASSIGNABLE_ROLES: Role[] = ['FIRM_ADMIN', 'LAWYER', 'CLERK', 'CLIENT'];
 
-const STATUS_TONE: Record<UserStatus, Tone> = {
-  INVITED: 'info', ACTIVE: 'success', SUSPENDED: 'warning', DEACTIVATED: 'neutral',
-};
-
 /** What a firm administrator may do to a member's status, per the backend's own rules. */
 const NEXT_STATUS: Record<UserStatus, UserStatus[]> = {
   INVITED: ['DEACTIVATED'],
   ACTIVE: ['SUSPENDED', 'DEACTIVATED'],
   SUSPENDED: ['ACTIVE', 'DEACTIVATED'],
   DEACTIVATED: ['ACTIVE'],
+};
+
+/**
+ * Buttons are labelled with the verb, not the destination state.
+ *
+ * A button reading "Suspended" beside a badge reading "Active" is genuinely ambiguous —
+ * it looks like a second status label rather than something that will happen when it is
+ * pressed.
+ */
+const STATUS_VERB: Record<UserStatus, string> = {
+  ACTIVE: 'Reinstate',
+  SUSPENDED: 'Suspend',
+  DEACTIVATED: 'Deactivate',
+  INVITED: 'Re-invite',
 };
 
 const inviteSchema = z.object({
@@ -96,28 +108,35 @@ export function MembersPage() {
     <>
       <PageHeader
         title="People"
-        description="Who has access to this firm's JurisCore, and what they can do."
-        actions={mayManage && <Button onClick={() => setInviting(true)}>Invite someone</Button>}
+        description="Who has access to this firm's workspace. What each person may do is enforced by the server."
+        actions={mayManage && (
+          <Button icon="plus" onClick={() => setInviting(true)}>Invite someone</Button>
+        )}
       />
 
       <Card>
-        <div className="flex flex-wrap gap-3 border-b border-ink-200 p-3">
-          <div className="min-w-[12rem] flex-1">
-            <label htmlFor="member-search" className="sr-only">Search people</label>
-            <Input id="member-search" type="search" placeholder="Search by name or email"
-              value={searchInput} onChange={(event) => setSearchInput(event.target.value)} />
+        <Toolbar>
+          <div className="min-w-[12rem] flex-1 sm:max-w-xs">
+            <Field label="Search people" srOnlyLabel>
+              {({ id }) => (
+                <SearchInput id={id} placeholder="Name or email"
+                  value={searchInput}
+                  onChange={(event) => setSearchInput(event.target.value)} />
+              )}
+            </Field>
           </div>
-          <div>
-            <label htmlFor="member-role" className="sr-only">Filter by role</label>
-            <Select id="member-role" value={params.role}
-              onChange={(event) => update({ role: event.target.value })}>
-              <option value="">All roles</option>
-              {ASSIGNABLE_ROLES.map((role) => (
-                <option key={role} value={role}>{humanise(role)}</option>
-              ))}
-            </Select>
-          </div>
-        </div>
+          <Field label="Role" srOnlyLabel>
+            {({ id }) => (
+              <Select id={id} value={params.role} aria-label="Filter by role"
+                onChange={(event) => update({ role: event.target.value })}>
+                <option value="">All roles</option>
+                {ASSIGNABLE_ROLES.map((role) => (
+                  <option key={role} value={role}>{humanise(role)}</option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        </Toolbar>
 
         <AsyncSection
           isLoading={query.isPending}
@@ -126,7 +145,8 @@ export function MembersPage() {
           isEmpty={(data) => data.items.length === 0}
           onRetry={() => query.refetch()}
           skeleton={<TableSkeleton columns={5} />}
-          empty={<EmptyState title="Nobody found" description="Try widening the filters." />}
+          empty={<EmptyState icon="people" title="Nobody found"
+            description="Try widening the filters." />}
         >
           {(data) => (
             <>
@@ -138,9 +158,16 @@ export function MembersPage() {
                   {
                     key: 'name', header: 'Name', primary: true,
                     cell: (member: User) => (
-                      <span>
-                        <span className="block font-medium text-ink-900">{member.fullName}</span>
-                        <span className="block text-xs text-ink-500">{member.email}</span>
+                      <span className="flex items-center gap-2.5">
+                        <Avatar name={member.fullName} size="sm" />
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-ink-900">
+                            {member.fullName}
+                          </span>
+                          <span className="block truncate text-xs text-ink-500">
+                            {member.email}
+                          </span>
+                        </span>
                       </span>
                     ),
                   },
@@ -165,30 +192,32 @@ export function MembersPage() {
                   },
                   {
                     key: 'status', header: 'Status',
-                    cell: (member: User) => (
-                      <Badge tone={STATUS_TONE[member.status]}>{humanise(member.status)}</Badge>
-                    ),
+                    cell: (member: User) => <UserStatusBadge status={member.status} />,
                   },
                   {
                     key: 'lastLogin', header: 'Last signed in',
                     cell: (member: User) => member.lastLoginAt
-                      ? formatDateTime(member.lastLoginAt) : 'Never',
+                      ? <span className="whitespace-nowrap text-ink-600">
+                        {formatDateTime(member.lastLoginAt)}
+                      </span>
+                      : <span className="text-ink-500">Never</span>,
                   },
                   ...(mayManage ? [{
-                    key: 'actions', header: 'Actions',
+                    key: 'actions', header: 'Actions', numeric: true,
                     cell: (member: User) => (
                       // Nobody can suspend or deactivate themselves out of the firm.
                       member.id === user?.id ? (
                         <span className="text-xs text-ink-500">That is you</span>
                       ) : (
-                        <span className="flex flex-wrap gap-1">
+                        <span className="flex flex-wrap justify-end gap-1">
                           {NEXT_STATUS[member.status].map((status) => (
                             <Button
-                              key={status} size="sm" variant="secondary"
+                              key={status} size="sm"
                               disabled={changeStatus.isPending}
+                              variant={status === 'DEACTIVATED' ? 'ghost' : 'secondary'}
                               onClick={() => changeStatus.mutate({ userId: member.id, status })}
                             >
-                              {humanise(status)}
+                              {STATUS_VERB[status]}
                             </Button>
                           ))}
                         </span>
