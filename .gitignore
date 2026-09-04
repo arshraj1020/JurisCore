@@ -29,3 +29,8 @@ application-local-override.yml
 *.pem
 *.p12
 *.jks
+
+# Frontend
+node_modules/
+frontend/dist/
+*.tsbuildinfo

@@ -525,6 +525,172 @@ them — `AuthService` records failures directly on the user row through
 `LoginAttemptRecorder`. Adding events to working authentication code for a Phase 5 concern
 was left for a follow-up rather than faked here.
 
+## 5d. Phase 6: the web client
+
+The frontend is a separate deployable in `frontend/` — React 18, TypeScript, Vite, React
+Router, TanStack Query, React Hook Form with Zod, Tailwind. Nothing else. No component
+library, no state-management library, no date library, no HTTP client wrapper: every one
+of those would have been a dependency carrying opinions the application did not need.
+
+It talks to the existing API and changed nothing behind it. No controller, DTO, policy or
+migration was touched for Phase 6, and the section below is largely a record of decisions
+made *because* the backend was treated as fixed.
+
+### The API is the contract, and it was read rather than assumed
+
+`src/types/api.ts` is a hand transcription of the backend's response classes rather than a
+generated client. Two properties of the wire format shape a lot of the code above it.
+
+`spring.jackson.default-property-inclusion: non_null` means an unset field is **absent**
+from the JSON, not present as `null`. Every optional field is therefore typed
+`field?: T | null` — the union is not defensive noise, it is what actually arrives.
+
+`BigDecimal` and `Instant` serialise as JSON **strings**, and money is kept as a string all
+the way to the formatter. Parsing an invoice total into a JavaScript number is how
+`11800.00` becomes `11799.999999999998`, and the only cure is to never do it.
+
+There is one deliberate wrinkle in the type, documented where it is declared:
+`Invoice.lineItems` is optional because the backend omits line items from a *page* of
+invoices — the Phase 5 fix for `LazyInitializationException`. `undefined` there means "not
+included in this response", never "this invoice has no lines", and the detail page fetches
+the invoice by id precisely to get them.
+
+### Tokens: memory, storage, and one honest trade-off
+
+The **access token is held in a module-level variable and never persisted**. It is
+short-lived, and a cross-site scripting bug cannot read a usable credential out of storage
+after the tab has gone.
+
+The **refresh token is in `localStorage`**, because the backend offers no cookie-based
+session and a page reload would otherwise sign the user out. This is a real trade-off, not
+an oversight: a persisted refresh token is readable by any script running on the origin.
+The properly hardened answer is an httpOnly, `SameSite` cookie issued by the backend. That
+is a backend change; Phase 6's brief was not to make backend changes for frontend
+convenience, so it was not made, and it is recorded here as a limitation rather than
+papered over with something that merely looks safer.
+
+Neither token is ever logged, and neither ever appears in a URL.
+
+### One refresh, however many requests failed
+
+The single-flight promise in `src/lib/api/client.ts` is the piece most worth understanding.
+
+A dashboard fires six queries at once. If the access token has expired, all six get a 401
+within milliseconds of each other. Six parallel refreshes would rotate the refresh token
+six times — and the backend *revokes the token it replaces*, so five of those rotations
+would fail and the user would be signed out in the middle of a working session. Sharing one
+in-flight promise means one rotation and five waiters. It is cleared in `finally`, so a
+refresh that fails does not wedge every later request behind a permanently rejected
+promise. There is a test that fires six parallel 401s and asserts exactly one rotation.
+
+A 401 that no refresh can rescue ends the session through a listener rather than a direct
+import, so the HTTP layer does not depend on React state. 401 and 403 are handled
+distinctly throughout: 401 means "your session ended, sign in again", 403 means "you may
+not do this", and the error panel for a 403 deliberately offers no Retry button, because
+hammering a request that will never succeed helps nobody.
+
+### Role checks are UX, and the code says so
+
+`src/lib/auth/roles.ts` mirrors each controller's `@PreAuthorize` so the interface does not
+offer buttons that will 403. It is not a security boundary and the file's own comment says
+that in the first line. The backend enforces every rule regardless.
+
+Two roles reach nothing in the workspace, for different reasons. **CLIENT** has no client
+portal in the product: an invoice or a case that references a client is a firm-side record
+*about* them. **SUPER_ADMIN** has no organization, so `CurrentUser.requireOrganizationId()`
+refuses it server-side before any handler body runs — routing it into the shell would
+render a dashboard of errors, so `RequireFirmContext` shows it a plain explanation instead.
+A test asserts that both roles are denied *every* permission in the map, so a permission
+added later cannot quietly reach them.
+
+The route guard waits for the session check rather than redirecting immediately. Because
+the access token lives in memory, a page reload always starts with no session, and
+redirecting during that window would sign a legitimate user out every time they pressed
+refresh.
+
+### Documents go around the API, not through it
+
+The Phase 4 contract is used as designed: `POST /cases/{id}/documents` registers the row
+and returns a one-time upload link; the bytes go **straight to storage** on that link; and
+`POST /documents/{id}/complete` tells the backend they landed.
+
+The storage request carries **no `Authorization` header**. The presigned signature is the
+authorisation, and sending a bearer token alongside it both leaks the token to a third
+party and gets the request rejected as double-authenticated. That request is the one place
+in the application that is not `fetch`: it uses `XMLHttpRequest`, because that is the only
+browser API that reports upload progress, which someone waiting on a 40 MB filing wants to
+see. No storage credential ever reaches the browser — a signed, expiring URL is all it gets.
+
+An expired link comes back as 403 and is mapped to `UPLOAD_LINK_EXPIRED`. The retry
+restarts at registration to mint a fresh signature rather than replaying a dead one, and
+that is what the test asserts: two registrations, not one registration and two PUTs.
+
+### Money, and where arithmetic is allowed to happen
+
+Every figure on an invoice — subtotal, tax, discount, total, paid, outstanding — is
+rendered from what the server sent. The frontend subtracts nothing and sums nothing. There
+is a test that feeds the page a deliberately inconsistent invoice (lines totalling 11,800
+but a stated total of 9,999.99) and asserts the page prints the server's figure.
+
+The one exception is the running estimate under a *draft* being typed, which is labelled
+"indicative only" in the interface. It lives in `src/lib/money.ts` and is written in
+`bigint` rather than `number`, mirroring the backend's per-line HALF_UP rounding, because
+the naive version is wrong in a way that is easy to ship: an eight-line invoice accumulates
+enough IEEE-754 drift to show a preview a paisa away from what the server returns a second
+later, and a figure that is *almost* right is worse than no figure, since nobody knows
+which one to trust. Lines that do not parse are skipped and flagged rather than counted as
+zero — a total that silently ignores a half-typed line reads as authoritative.
+
+`src/lib/lifecycle.ts` transcribes the backend's status policies for the same reason a
+dropdown should not list "Paid" for a cancelled invoice: an option that exists only to fail
+is worse than no option. The file states plainly that if it and the backend ever disagree,
+the backend is right and the file is the bug. The UI consequences are direct — a draft
+offers Issue and Cancel but never a payment, an issued invoice offers a payment but no
+further editing, and a PAID or CANCELLED invoice offers nothing at all.
+
+### Audit has no write path
+
+The audit feature module exposes reads only, because the backend exposes reads only. There
+is no edit and no delete in the interface — not hidden from a role, absent. A trail that
+can be altered from the application it records is not a trail, and the module's comment
+says the absence is the contract rather than an omission.
+
+### Smaller decisions, briefly
+
+**List state lives in the URL.** A filtered list survives navigation, can be bookmarked and
+shared, and the back button behaves. Changing a filter resets to the first page, because
+being left on page 4 of a result set that no longer exists is nobody's intent.
+
+**Native `<dialog>` for modals.** The browser then supplies the focus trap, the inert
+background, Escape-to-close and the top layer — four things that are easy to implement
+badly and immediately noticeable to anyone using a keyboard or a screen reader.
+
+**A table above `md`, cards below.** Not a table that shrinks: a seven-column table at
+375px is unusable however it is styled, and horizontal scrolling hides the columns people
+came for.
+
+**Notification `actionPath` is re-checked before navigation.** The backend already
+constrains it to a relative path; the frontend checks again that it starts with `/` and not
+`//`. A value handed to the router unchecked is how a notification becomes an open
+redirect, and the re-check costs one comparison. There are tests for `javascript:`,
+absolute and protocol-relative values.
+
+**No `dangerouslySetInnerHTML` anywhere.** Every string from the API is rendered as text.
+
+**Port 3000, pinned.** The backend's default CORS allow-list is `http://localhost:3000`, so
+the dev server matches it rather than the backend's allow-list being widened to match Vite's
+default 5173. Convenience is not a reason to loosen a security setting.
+
+### What Phase 6 is not
+
+No client portal — CLIENT signs in and is told there is no workspace for the account, which
+is the honest state of the product. No offline support, no service worker, no push. No
+server-side rendering. No internationalisation: the interface is English, with dates and
+money formatted for `en-IN`. No file preview — documents download through a signed link
+rather than rendering in-app. No dashboard aggregates beyond counts the API already
+returns, because a "revenue this quarter" tile would have to be summed from one page of
+invoices and would be wrong as soon as there were two.
+
 ## 6. What Phase 1 deliberately leaves out
 
 - **API gateway.** One deployable needs no gateway. The ALB terminates TLS and routes; a

@@ -3,9 +3,9 @@
 Enterprise legal case management and court workflow platform for law firms, advocates and
 their clients.
 
-**Status: Phase 1 (Foundation) — multi-tenant identity, authentication and the platform
-skeleton.** Cases, hearings, tasks, documents and billing are scheduled for later phases;
-see [Roadmap](#roadmap).
+**Status: Phase 6 — the API is complete through billing, notifications and audit, and a
+React/TypeScript web client now sits on top of it.** See [Roadmap](#roadmap) for what each
+phase covers and, just as importantly, what it does not.
 
 ---
 
@@ -30,6 +30,7 @@ see [Roadmap](#roadmap).
 | Invoices, line items, recorded payments, overdue sweep | Done (Phase 5) |
 | In-app notifications and per-user category preferences | Done (Phase 5) |
 | Append-only audit trail with a firm-admin query API | Done (Phase 5) |
+| React/TypeScript web client for the whole API | Done (Phase 6) |
 
 ## Verification status
 
@@ -59,6 +60,13 @@ static-call arity, Spring Data derived-query property names and JPQL paths — z
 unresolved references, zero unused imports. That is a good deal stronger than a read-through
 and still not a compiler.
 
+**Phase 6 (web client):** `npm run verify` — typecheck, ESLint, 65 tests and a production
+build — was executed on the developer's machine and passes with zero errors. The client has
+**not** been exercised against a running backend end to end; every test runs against MSW
+handlers built from the API's real response shapes, which pins the contract as it is
+written down but cannot catch a place where the written contract and the running service
+disagree. Pointing the dev server at a local backend is the check that would close that gap.
+
 **[docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md) is the procedure that closes the
 gap** — prerequisites through teardown, ending in one paste-able block.
 
@@ -82,6 +90,7 @@ juriscore/
 ├── juriscore-identity/      Users, authentication, JWT, RBAC, sessions
 ├── juriscore-app/           The deployable: configuration, migrations, filters,
 │                            composition of every module
+├── frontend/                React + TypeScript web client (its own README)
 ├── docker/                  LocalStack bootstrap (S3 bucket, SQS queues + DLQs)
 └── .github/workflows/       CI
 ```
@@ -93,6 +102,7 @@ juriscore/
 - JDK 21
 - Maven 3.9+
 - Docker and Docker Compose
+- Node 20+ and npm, for the web client
 
 ### Everything in containers
 
@@ -114,6 +124,22 @@ mvn -pl juriscore-app -am spring-boot:run
 
 The `local` profile is active by default and carries a development JWT secret, so a
 fresh checkout runs with no further setup.
+
+### The web client
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+<http://localhost:3000>. The port is pinned deliberately: the backend's default CORS
+allow-list is `http://localhost:3000`, so the dev server matches it rather than the
+allow-list being widened to match Vite's default. Register a firm from the sign-in page, or
+sign in with an account you created through the API.
+
+`npm run verify` in `frontend/` runs typecheck, lint, tests and a production build — the
+gate the frontend has to pass. See [frontend/README.md](frontend/README.md).
 
 ### First requests
 
@@ -233,6 +259,10 @@ mvn test        # unit tests
 mvn verify      # + integration tests (needs Docker for Testcontainers)
 ```
 
+```bash
+cd frontend && npm run verify   # typecheck, lint, tests, production build
+```
+
 For a full clean-machine procedure — prerequisites, infrastructure, startup, health,
 smoke tests, image build and teardown — see **[docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md)**,
 which ends in a single paste-able block. Against a running application,
@@ -255,6 +285,15 @@ Two of these encode bugs that were found and fixed during verification, so they 
 regression tests rather than decoration: `SecurityGuaranteesIT.resetLinkIsSingleUse` and
 `RateLimitIT.repairsAnImmortalCounter`.
 
+The web client has 65 tests over nine files, aimed at what is actually easy to get wrong
+rather than at a coverage number: exact decimal arithmetic and HALF_UP rounding; the token
+refresh single-flight under a burst of six parallel 401s; the presigned upload contract,
+including the absent `Authorization` header on the storage request and the expired-link
+retry that mints a new signature; lifecycle and role gating on the invoice page; the auth
+redirect that must not fire while a session is still being restored; and the open-redirect
+check on notification action paths. MSW runs with `onUnhandledRequest: 'error'`, so a
+request nobody wrote a handler for fails the suite instead of passing quietly.
+
 ## Configuration
 
 Everything environment-specific is an environment variable with a local default; see
@@ -263,6 +302,12 @@ Everything environment-specific is an environment variable with a local default;
 `JURISCORE_JWT_SECRET` has **no default outside local development** — the application
 refuses to start without it rather than signing tokens with a value from a tutorial.
 Generate one with `openssl rand -base64 48`.
+
+The web client takes one variable, `VITE_API_BASE_URL`, documented in
+[`frontend/.env.example`](frontend/.env.example). It is empty in development, where the
+dev server and the backend's CORS allow-list already agree on `http://localhost:3000`.
+Only `VITE_`-prefixed variables reach the browser and every one of them is compiled into
+the bundle, so nothing secret belongs in that file.
 
 ## Roadmap
 
@@ -316,7 +361,29 @@ Phases follow the PRD.
     in a different one is refused rather than converted. There is no FX rate anywhere.
   - **No analytics and no Redis caching**, both of which earlier notes filed under
     "Phase 5". Neither is implemented.
-- **Phase 6 — Production**: AWS deployment, monitoring, autoscaling, security hardening,
+- **Phase 6 — Web client** *(this release)*: a React + TypeScript single-page application
+  in `frontend/`, covering the whole API — sign-in and registration with automatic token
+  refresh, clients, matters and the case timeline, courts, hearings, tasks, deadlines,
+  documents through the presigned flow, invoices and payments, notifications and the audit
+  trail. No backend code was changed for it.
+
+  **What Phase 6 is not:**
+
+  - **No client portal.** A `CLIENT` account signs in and is told there is no workspace for
+    it, because there isn't one — the API exposes no client-facing endpoints. The role is
+    handled honestly rather than given a UI that would 403 on every request.
+  - **Frontend role checks are UX only.** The interface hides actions a role cannot perform
+    so people are not offered buttons that fail. Every one of those rules is enforced by
+    the backend, which is the only thing that decides.
+  - **The frontend calculates no money.** Totals, balances and statuses come from the
+    server. The one exception is a clearly-labelled estimate under an invoice draft being
+    typed, computed in exact decimal arithmetic to match the server's own rounding.
+  - **The refresh token is in `localStorage`.** An httpOnly cookie would be better and is a
+    backend change; it was not made, and the trade-off is recorded in
+    [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §5d rather than glossed over.
+  - **No offline support, service worker, SSR, internationalisation or in-app file
+    preview.** Documents download through a signed link.
+- **Phase 7 — Production**: AWS deployment, monitoring, autoscaling, security hardening,
   load testing.
 
 ## Notes

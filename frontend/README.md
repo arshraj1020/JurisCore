@@ -1,0 +1,91 @@
+# JurisCore — frontend
+
+The web client for the JurisCore API. React 18, TypeScript, Vite, React Router, TanStack
+Query, React Hook Form + Zod, Tailwind. No component library, no state-management library,
+no date library — the dependency list is short on purpose.
+
+## Running it
+
+```bash
+npm install
+npm run dev      # http://localhost:3000
+```
+
+The dev server is pinned to port 3000 (`strictPort`). That is not cosmetic: the backend's
+default CORS allow-list is `http://localhost:3000`, so the frontend works against a stock
+backend without widening CORS for convenience. Start the API separately (`mvn spring-boot:run`
+in `juriscore-app`, or the Docker Compose stack) and sign in.
+
+| Script | What it does |
+|---|---|
+| `npm run dev` | Vite dev server on port 3000 |
+| `npm run build` | Typecheck, then a production build into `dist/` |
+| `npm run typecheck` | `tsc -b` with no emit |
+| `npm run lint` | ESLint over the whole tree |
+| `npm test` | Vitest, once |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run verify` | typecheck → lint → test → build. This is the gate. |
+
+Configuration is one variable, documented in `.env.example`. Only `VITE_`-prefixed
+variables reach the browser and everything that does is public — nothing secret belongs in
+that file.
+
+## How it is laid out
+
+```
+src/
+  app/          shell, navigation, route guards
+  components/ui primitives, tables, dialogs, async states
+  features/     one folder per domain area; each owns its api.ts and its pages
+  lib/
+    api/        the HTTP client, error model, query keys, list hooks
+    auth/       token storage, session context, the role capability map
+    lifecycle   the backend's state machines, transcribed
+    money       exact decimal arithmetic for the invoice draft preview
+    format      dates, money and quantities for display
+  types/api.ts  every DTO the backend exposes
+  test/         MSW server, render helpers, fixtures
+```
+
+`src/types/api.ts` is transcribed from the backend's response classes rather than
+generated. Two things about the API shape drive a lot of the code above it: the backend
+runs with `spring.jackson.default-property-inclusion: non_null`, so an absent field means
+absent rather than `null`; and `BigDecimal` serialises as a string, which is why money
+stays a string all the way to the formatter.
+
+## Things worth knowing before changing something
+
+**Money is never a JavaScript number.** Totals, balances and line amounts arrive as
+strings and are formatted as strings. The one place arithmetic happens is
+`src/lib/money.ts`, in `bigint`, for the *estimate* under a draft invoice — the server
+computes the figures that are stored and billed, and it is the only authority on them.
+
+**Role checks are UX, not security.** `src/lib/auth/roles.ts` mirrors the backend's
+`@PreAuthorize` annotations so the interface does not offer buttons that will 403. The
+backend enforces every one of them regardless of what this file says.
+
+**Lifecycle rules are a copy.** `src/lib/lifecycle.ts` transcribes the server's status
+policies so a dropdown never lists a transition that will be refused. If the two ever
+disagree, the backend is right and that file is the bug.
+
+**The access token lives in memory only.** The refresh token is in `localStorage`, which
+is a real trade-off recorded in `src/lib/auth/tokenStorage.ts` — an httpOnly cookie would
+be a backend change and was not made. A 401 triggers exactly one refresh no matter how
+many requests failed at once; see the single-flight promise in `src/lib/api/client.ts`.
+
+**Document bytes never go through the Spring API.** Register, PUT to the presigned URL
+with no `Authorization` header, then tell the backend it landed. `CaseDocumentsTab` is the
+only place that does this, and an expired link restarts at registration rather than
+replaying a dead signature.
+
+## Tests
+
+65 tests across nine files, run with `npm test`. They cover the things that are actually
+easy to get wrong: exact decimal arithmetic and HALF_UP rounding, the refresh single-flight
+under a burst of parallel 401s, the presigned upload contract including the absent
+Authorization header and the expired-link retry, lifecycle and role gating on the invoice
+page, the auth redirect that must not fire while the session is still being restored, and
+the open-redirect check on notification action paths.
+
+MSW backs every test with `onUnhandledRequest: 'error'`, so a request nobody wrote a
+handler for fails the suite rather than passing quietly for the wrong reason.
