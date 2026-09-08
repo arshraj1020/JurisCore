@@ -14,15 +14,19 @@ import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states'
 import { Dialog } from '@/components/ui/Dialog';
 import { DeadlineStatusBadge } from '@/components/ui/StatusBadge';
 import { formatDateTime, formatRelative, humanise, isPast } from '@/lib/format';
-import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
+import { messageFor } from '@/lib/api/errors';
+import { applyServerErrors } from '@/lib/api/formErrors';
+import { FormErrorSummary } from '@/components/ui/FormErrorSummary';
+import { LIMITS, boundedText, optionalText } from '@/lib/validation';
 import type { DeadlineStatus, DeadlineType } from '@/types/api';
 
+// Mirrors DeadlineRequest. Description is 4000 on the backend.
 const schema = z.object({
-  title: z.string().min(1, 'Enter a title').max(300),
-  description: z.string().max(2000).or(z.literal('')),
+  title: boundedText(LIMITS.TITLE, 'Enter a title'),
+  description: optionalText(LIMITS.LONG_TEXT),
   deadlineType: z.enum(['COURT', 'INTERNAL', 'OTHER']),
   dueAt: z.string().min(1, 'Choose when it falls due'),
-  source: z.string().max(255).or(z.literal('')),
+  source: optionalText(LIMITS.ADDRESS),
 });
 type Values = z.infer<typeof schema>;
 
@@ -74,10 +78,7 @@ export function CaseDeadlinesTab({ caseId }: { caseId: string }) {
     try {
       await create.mutateAsync(values);
     } catch (error) {
-      for (const [field, message] of Object.entries(fieldErrorsOf(error))) {
-        if (field in schema.shape) setError(field as keyof Values, { message });
-      }
-      setError('root', { message: messageFor(error) });
+      applyServerErrors(error, setError, Object.keys(schema.shape));
     }
   });
 
@@ -148,11 +149,7 @@ export function CaseDeadlinesTab({ caseId }: { caseId: string }) {
 
       <Dialog open={creating} onClose={() => setCreating(false)} title="Add a deadline" footer={<span />}>
         <form onSubmit={submit} noValidate className="space-y-4">
-          {errors.root && (
-            <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-              {errors.root.message}
-            </div>
-          )}
+          <FormErrorSummary message={errors.root?.message} />
           <Field label="Title" error={errors.title?.message} required>
             {({ id, describedBy, invalid }) => (
               <Input id={id} autoFocus aria-describedby={describedBy} invalid={invalid}

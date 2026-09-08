@@ -125,6 +125,13 @@ mvn -pl juriscore-app -am spring-boot:run
 The `local` profile is active by default and carries a development JWT secret, so a
 fresh checkout runs with no further setup.
 
+LocalStack is optional until you try to upload a document. That flow has the *browser* PUT
+the file straight to a presigned S3 URL, so with LocalStack stopped the upload fails at a
+step the server never sees. Against a local endpoint the URL is signed path-style
+(`http://localhost:4566/juriscore-documents/...`) because the virtual-host form the SDK
+produces by default resolves in almost no browser — see
+[docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md#document-upload-needs-localstack-and-needs-it-reachable-from-the-browser).
+
 ### The web client
 
 ```bash

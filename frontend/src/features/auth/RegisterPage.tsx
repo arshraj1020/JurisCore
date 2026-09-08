@@ -5,20 +5,26 @@ import { z } from 'zod';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { Alert, Button, Field, Input, PasswordInput } from '@/components/ui/primitives';
-import { ApiError, fieldErrorsOf } from '@/lib/api/errors';
+import { ApiError } from '@/lib/api/errors';
+import { mapServerErrors } from '@/lib/api/formErrors';
+import { LIMITS, boundedText, strongPassword } from '@/lib/validation';
 import { AuthLayout } from './AuthLayout';
 
 /**
- * Password rules are checked here only to save a round trip. `WEAK_PASSWORD` from the
- * backend is what actually decides, and it is surfaced on the field below — duplicating
- * the full policy in the browser would guarantee the two drift apart.
+ * `WEAK_PASSWORD` from the backend is still what decides — the rules mirrored in
+ * `@/lib/validation` exist to save a round trip and to say *which* rule was missed while
+ * the user is still in the field. The two are kept in one place precisely so they cannot
+ * drift: `strongPassword` is a transcription of `StrongPasswordValidator`, cited line by
+ * line, rather than a second opinion about what a good password is.
  */
 const schema = z.object({
-  firmName: z.string().min(1, 'Enter your firm name').max(200),
-  firstName: z.string().min(1, 'Enter your first name').max(100),
-  lastName: z.string().min(1, 'Enter your last name').max(100),
-  email: z.string().min(1, 'Enter an email address').email('That does not look like an email address'),
-  password: z.string().min(12, 'Use at least 12 characters'),
+  firmName: boundedText(LIMITS.NAME, 'Enter your firm name'),
+  firstName: boundedText(LIMITS.PERSON_NAME, 'Enter your first name'),
+  lastName: boundedText(LIMITS.PERSON_NAME, 'Enter your last name'),
+  email: z.string().trim().min(1, 'Enter an email address')
+    .email('That does not look like an email address')
+    .max(LIMITS.EMAIL, `Use at most ${LIMITS.EMAIL} characters`),
+  password: strongPassword,
 });
 type Values = z.infer<typeof schema>;
 
@@ -38,22 +44,18 @@ export function RegisterPage() {
       await registerFirm({ ...values, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
       navigate('/', { replace: true });
     } catch (error) {
-      // Field-level violations from Bean Validation go onto their fields; anything else
-      // is shown once at the top rather than silently dropped.
-      const fieldErrors = fieldErrorsOf(error);
-      let handled = false;
-      for (const [field, message] of Object.entries(fieldErrors)) {
-        if (field in schema.shape) {
-          setError(field as keyof Values, { message });
-          handled = true;
-        }
+      // Field-level violations from Bean Validation go onto their fields; everything
+      // else goes to the banner above the form. Nothing is dropped.
+      const { fields, summary } = mapServerErrors(error, Object.keys(schema.shape));
+      for (const { field, message } of fields) {
+        setError(field as keyof Values, { message });
       }
       if (error instanceof ApiError && error.code === 'WEAK_PASSWORD') {
         setError('password', { message: error.message });
-        handled = true;
-      }
-      if (!handled) {
-        setFormError(error instanceof ApiError ? error.message : 'Could not create the account.');
+      } else if (summary.length > 0) {
+        setFormError(summary.join(' '));
+      } else if (fields.length === 0) {
+        setFormError('Could not create the account.');
       }
     }
   });

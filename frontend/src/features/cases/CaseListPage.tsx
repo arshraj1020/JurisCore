@@ -21,15 +21,17 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Pagination } from '@/components/ui/Pagination';
 import { CaseStatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate, humanise } from '@/lib/format';
-import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
+import { applyServerErrors } from '@/lib/api/formErrors';
+import { FormErrorSummary } from '@/components/ui/FormErrorSummary';
+import { LIMITS, boundedText, optionalText } from '@/lib/validation';
 import type { CaseStatus, LegalCase } from '@/types/api';
 
 const CASE_STATUSES: CaseStatus[] = ['OPEN', 'IN_PROGRESS', 'ON_HOLD', 'CLOSED'];
 
 const createSchema = z.object({
-  title: z.string().min(1, 'Enter a title').max(300),
+  title: boundedText(LIMITS.TITLE, 'Enter a title'),
   clientId: z.string().uuid('Choose a client'),
-  description: z.string().max(4000).or(z.literal('')),
+  description: optionalText(LIMITS.LONG_TEXT),
 });
 type CreateValues = z.infer<typeof createSchema>;
 
@@ -64,20 +66,13 @@ function CreateCaseForm({ defaultClientId, onDone, onCancel }: {
         description: values.description.trim() || null,
       });
     } catch (error) {
-      for (const [field, message] of Object.entries(fieldErrorsOf(error))) {
-        if (field in createSchema.shape) setError(field as keyof CreateValues, { message });
-      }
-      setError('root', { message: messageFor(error) });
+      applyServerErrors(error, setError, Object.keys(createSchema.shape));
     }
   });
 
   return (
     <form onSubmit={submit} noValidate className="space-y-4">
-      {errors.root && (
-        <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-          {errors.root.message}
-        </div>
-      )}
+      <FormErrorSummary message={errors.root?.message} />
 
       <Field label="Matter title" error={errors.title?.message} required>
         {({ id, describedBy, invalid }) => (

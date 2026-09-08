@@ -2,22 +2,25 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button, Field, Input, Select, Textarea } from '@/components/ui/primitives';
-import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
+import { applyServerErrors } from '@/lib/api/formErrors';
+import { FormErrorSummary } from '@/components/ui/FormErrorSummary';
+import { LIMITS, boundedText, optionalEmail, optionalText } from '@/lib/validation';
 import { useUnsavedChangesWarning } from '@/lib/api/hooks';
 import type { Client, ClientRequest } from '@/types/api';
 
+// Mirrors CreateClientRequest/UpdateClientRequest — see @/lib/validation for the limits.
 const schema = z.object({
-  displayName: z.string().min(1, 'Enter a name').max(200),
+  displayName: boundedText(LIMITS.NAME, 'Enter a name'),
   clientType: z.enum(['INDIVIDUAL', 'CORPORATE']),
-  email: z.string().email('That does not look like an email address').max(255).or(z.literal('')),
-  phone: z.string().max(40).or(z.literal('')),
-  addressLine1: z.string().max(255).or(z.literal('')),
-  addressLine2: z.string().max(255).or(z.literal('')),
-  city: z.string().max(120).or(z.literal('')),
-  state: z.string().max(120).or(z.literal('')),
-  country: z.string().max(120).or(z.literal('')),
-  postalCode: z.string().max(20).or(z.literal('')),
-  notes: z.string().max(2000).or(z.literal('')),
+  email: optionalEmail,
+  phone: optionalText(LIMITS.PHONE),
+  addressLine1: optionalText(LIMITS.ADDRESS),
+  addressLine2: optionalText(LIMITS.ADDRESS),
+  city: optionalText(LIMITS.LOCALITY),
+  state: optionalText(LIMITS.LOCALITY),
+  country: optionalText(LIMITS.LOCALITY),
+  postalCode: optionalText(LIMITS.POSTAL_CODE),
+  notes: optionalText(LIMITS.NOTES),
 });
 type Values = z.infer<typeof schema>;
 
@@ -71,20 +74,13 @@ export function ClientForm({ client, onSubmit, onCancel, submitLabel }: {
     try {
       await onSubmit(toRequest(values));
     } catch (error) {
-      for (const [field, message] of Object.entries(fieldErrorsOf(error))) {
-        if (field in schema.shape) setError(field as keyof Values, { message });
-      }
-      setError('root', { message: messageFor(error) });
+      applyServerErrors(error, setError, Object.keys(schema.shape));
     }
   });
 
   return (
     <form onSubmit={submit} noValidate className="space-y-4">
-      {errors.root && (
-        <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-          {errors.root.message}
-        </div>
-      )}
+      <FormErrorSummary message={errors.root?.message} />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Name" error={errors.displayName?.message} required>

@@ -19,7 +19,10 @@ import { DataTable } from '@/components/ui/DataTable';
 import { Dialog } from '@/components/ui/Dialog';
 import { Pagination } from '@/components/ui/Pagination';
 import { formatDateTime, humanise } from '@/lib/format';
-import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
+import { messageFor } from '@/lib/api/errors';
+import { applyServerErrors } from '@/lib/api/formErrors';
+import { FormErrorSummary } from '@/components/ui/FormErrorSummary';
+import { LIMITS, boundedText, optionalText } from '@/lib/validation';
 import type { Role, User, UserStatus } from '@/types/api';
 
 /** Roles a firm administrator can hand out. SUPER_ADMIN is not one of them. */
@@ -47,11 +50,13 @@ const STATUS_VERB: Record<UserStatus, string> = {
   INVITED: 'Re-invite',
 };
 
+// Mirrors InviteUserRequest. Phone is 40 on the backend, not 32.
 const inviteSchema = z.object({
-  email: z.string().trim().email('Enter a valid email address'),
-  firstName: z.string().trim().min(1, 'Enter a first name').max(100),
-  lastName: z.string().trim().min(1, 'Enter a last name').max(100),
-  phone: z.string().max(32),
+  email: z.string().trim().email('Enter a valid email address')
+    .max(LIMITS.EMAIL, `Use at most ${LIMITS.EMAIL} characters`),
+  firstName: boundedText(LIMITS.PERSON_NAME, 'Enter a first name'),
+  lastName: boundedText(LIMITS.PERSON_NAME, 'Enter a last name'),
+  phone: optionalText(LIMITS.PHONE),
   role: z.enum(['FIRM_ADMIN', 'LAWYER', 'CLERK', 'CLIENT']),
 });
 type InviteValues = z.infer<typeof inviteSchema>;
@@ -270,10 +275,7 @@ function InviteDialog({ onClose, onInvited }: {
     try {
       await invite.mutateAsync(values);
     } catch (error) {
-      for (const [field, message] of Object.entries(fieldErrorsOf(error))) {
-        if (field in inviteSchema.shape) setError(field as keyof InviteValues, { message });
-      }
-      setError('root', { message: messageFor(error) });
+      applyServerErrors(error, setError, Object.keys(inviteSchema.shape));
     }
   });
 
@@ -286,11 +288,7 @@ function InviteDialog({ onClose, onInvited }: {
       footer={<span />}
     >
       <form onSubmit={submit} noValidate className="space-y-4">
-        {errors.root && (
-          <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-            {errors.root.message}
-          </div>
-        )}
+        <FormErrorSummary message={errors.root?.message} />
         <Field label="Email" error={errors.email?.message} required>
           {({ id, describedBy, invalid }) => (
             <Input id={id} type="email" autoFocus autoComplete="off"

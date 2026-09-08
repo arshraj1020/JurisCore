@@ -10,12 +10,17 @@ import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import { nextHearingStatuses } from '@/lib/lifecycle';
 import { useToast } from '@/components/ui/Toast';
-import { Button, Card, CardHeader, Field, Input, Select, Textarea } from '@/components/ui/primitives';
+import {
+  Alert, Button, Card, CardHeader, Field, Input, Select, Textarea,
+} from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
 import { Dialog } from '@/components/ui/Dialog';
 import { HearingStatusBadge } from '@/components/ui/StatusBadge';
 import { formatDateTime, formatRelative, humanise } from '@/lib/format';
-import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
+import { messageFor } from '@/lib/api/errors';
+import { applyServerErrors } from '@/lib/api/formErrors';
+import { FormErrorSummary } from '@/components/ui/FormErrorSummary';
+import { HEARING_DURATION, LIMITS, optionalText } from '@/lib/validation';
 import type { HearingStatus, HearingType } from '@/types/api';
 
 const HEARING_TYPES: HearingType[] = ['MENTION', 'EVIDENCE', 'ARGUMENTS', 'JUDGMENT', 'OTHER'];
@@ -24,10 +29,15 @@ const schema = z.object({
   courtId: z.string().min(1, 'Choose the court'),
   hearingType: z.enum(['MENTION', 'EVIDENCE', 'ARGUMENTS', 'JUDGMENT', 'OTHER']),
   scheduledAt: z.string().min(1, 'Choose the date and time'),
-  durationMinutes: z.string().regex(/^\d*$/, 'Whole minutes only').max(4),
-  judgeName: z.string().max(255).or(z.literal('')),
-  courtroom: z.string().max(100).or(z.literal('')),
-  purpose: z.string().max(2000).or(z.literal('')),
+  // @Min(1) @Max(1440) on the backend: a hearing is at most a full day.
+  durationMinutes: z.string().trim().refine(
+    (value) => value === ''
+      || (/^\d+$/.test(value)
+        && Number(value) >= HEARING_DURATION.MIN && Number(value) <= HEARING_DURATION.MAX),
+    `Enter whole minutes between ${HEARING_DURATION.MIN} and ${HEARING_DURATION.MAX}`),
+  judgeName: optionalText(LIMITS.NAME),
+  courtroom: optionalText(LIMITS.COURTROOM),
+  purpose: optionalText(LIMITS.PURPOSE),
 });
 type Values = z.infer<typeof schema>;
 
@@ -111,10 +121,7 @@ export function CaseHearingsTab({ caseId }: { caseId: string }) {
     try {
       await schedule.mutateAsync(values);
     } catch (error) {
-      for (const [field, message] of Object.entries(fieldErrorsOf(error))) {
-        if (field in schema.shape) setError(field as keyof Values, { message });
-      }
-      setError('root', { message: messageFor(error) });
+      applyServerErrors(error, setError, Object.keys(schema.shape));
     }
   });
 
@@ -220,13 +227,25 @@ export function CaseHearingsTab({ caseId }: { caseId: string }) {
         footer={<span />}
       >
         <form onSubmit={submit} noValidate className="space-y-4">
-          {errors.root && (
-            <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-              {errors.root.message}
-            </div>
-          )}
+          <FormErrorSummary message={errors.root?.message} />
 
-          {courts.data && courts.data.items.length === 0 ? (
+          {/*
+            Three states, not two. A failed court query used to fall through to the same
+            "No courts are on file yet" line as an empty one, which sends the user off to
+            create a court they already have — and offers no way to try again. An error is
+            not an empty list.
+          */}
+          {courts.isError ? (
+            <Alert tone="danger" live>
+              <div className="flex flex-wrap items-center gap-2">
+                <span>Couldn&rsquo;t load courts. {messageFor(courts.error)}</span>
+                <Button size="xs" variant="secondary" onClick={() => void courts.refetch()}
+                  loading={courts.isFetching}>
+                  Retry
+                </Button>
+              </div>
+            </Alert>
+          ) : courts.isSuccess && courts.data.items.length === 0 ? (
             <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
               No courts are on file yet. Add one under{' '}
               <Link to="/courts" className="font-medium underline">Courts</Link> first.
@@ -236,8 +255,12 @@ export function CaseHearingsTab({ caseId }: { caseId: string }) {
           <Field label="Court" error={errors.courtId?.message} required>
             {({ id, describedBy, invalid }) => (
               <Select id={id} autoFocus aria-describedby={describedBy} invalid={invalid}
-                disabled={courts.isPending} {...register('courtId')}>
-                <option value="">{courts.isPending ? 'Loading courts…' : 'Select a court'}</option>
+                disabled={courts.isPending || courts.isError} {...register('courtId')}>
+                <option value="">
+                  {courts.isPending ? 'Loading courts…'
+                    : courts.isError ? 'Courts unavailable'
+                      : 'Select a court'}
+                </option>
                 {courts.data?.items.map((court) => (
                   <option key={court.id} value={court.id}>
                     {court.name}{court.city ? ` — ${court.city}` : ''}

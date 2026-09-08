@@ -36,9 +36,17 @@ const DEADLINE: Record<DeadlineStatus, DeadlineStatus[]> = {
   CANCELLED: [],
 };
 
+/**
+ * `HearingStatusPolicy` on the server, exactly.
+ *
+ * An adjourned hearing cannot be marked completed: adjourning means the hearing did not
+ * happen, so it has to be relisted before there is anything to complete. The UI used to
+ * offer "Mark completed" there anyway, and the server answered 409 every time — an action
+ * that only ever failed.
+ */
 const HEARING: Record<HearingStatus, HearingStatus[]> = {
   SCHEDULED: ['COMPLETED', 'ADJOURNED', 'CANCELLED'],
-  ADJOURNED: ['SCHEDULED', 'COMPLETED', 'CANCELLED'],
+  ADJOURNED: ['SCHEDULED', 'CANCELLED'],
   COMPLETED: [],
   CANCELLED: [],
 };

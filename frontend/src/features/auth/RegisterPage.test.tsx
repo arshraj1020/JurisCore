@@ -23,7 +23,11 @@ async function fillTheForm() {
   await userEvent.type(screen.getByLabelText(/First name/), 'Arsh');
   await userEvent.type(screen.getByLabelText(/Last name/), 'Raj');
   await userEvent.type(screen.getByLabelText(/Email address/), 'arsh@example.test');
-  await userEvent.type(screen.getByLabelText(/^Password/), 'correct horse battery staple');
+  // Satisfies @StrongPassword: twelve or more characters with an upper-case letter, a
+  // lower-case letter, a digit and a symbol. The frontend now applies the same four
+  // rules, so a passphrase of plain lower-case words no longer gets as far as the
+  // server — which is the point, since the server would have refused it too.
+  await userEvent.type(screen.getByLabelText(/^Password/), 'Correct-Horse7!');
   await userEvent.click(screen.getByRole('button', { name: 'Create firm' }));
 }
 
@@ -60,7 +64,7 @@ describe('RegisterPage', () => {
       firstName: 'Arsh',
       lastName: 'Raj',
       email: 'arsh@example.test',
-      password: 'correct horse battery staple',
+      password: 'Correct-Horse7!',
     });
     // The browser's zone travels with the request; the backend stores it on the firm.
     expect(typeof (body as unknown as { timezone: unknown }).timezone).toBe('string');

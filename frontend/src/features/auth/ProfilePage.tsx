@@ -9,22 +9,28 @@ import { isFirmStaff } from '@/lib/auth/roles';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
 import {
-  Alert, Avatar, Badge, Button, Card, CardHeader, Detail, DetailList, Field, Input,
+  Avatar, Badge, Button, Card, CardHeader, Detail, DetailList, Field, Input,
   PasswordInput,
 } from '@/components/ui/primitives';
 import { formatDateTime, humanise } from '@/lib/format';
-import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
+import { applyServerErrors } from '@/lib/api/formErrors';
+import { FormErrorSummary } from '@/components/ui/FormErrorSummary';
+import { LIMITS, boundedText, optionalText, strongPassword } from '@/lib/validation';
 
+// Mirrors UpdateProfileRequest. Phone is 40 on the backend, not 32.
 const profileSchema = z.object({
-  firstName: z.string().trim().min(1, 'Enter your first name').max(100),
-  lastName: z.string().trim().min(1, 'Enter your last name').max(100),
-  phone: z.string().max(32),
+  firstName: boundedText(LIMITS.PERSON_NAME, 'Enter your first name'),
+  lastName: boundedText(LIMITS.PERSON_NAME, 'Enter your last name'),
+  phone: optionalText(LIMITS.PHONE),
 });
 type ProfileValues = z.infer<typeof profileSchema>;
 
+// `newPassword` carries @StrongPassword on the backend: length is only one of its four
+// rules, so a 12-character all-lowercase password used to pass here and be refused there
+// with a message the form had nowhere to put.
 const passwordSchema = z.object({
   currentPassword: z.string().min(1, 'Enter your current password'),
-  newPassword: z.string().min(12, 'Use at least 12 characters'),
+  newPassword: strongPassword,
   confirmPassword: z.string(),
 }).refine((values) => values.newPassword === values.confirmPassword, {
   path: ['confirmPassword'],
@@ -84,12 +90,7 @@ export function ProfilePage() {
     try {
       await saveProfile.mutateAsync(values);
     } catch (error) {
-      for (const [field, message] of Object.entries(fieldErrorsOf(error))) {
-        if (field in profileSchema.shape) {
-          profileForm.setError(field as keyof ProfileValues, { message });
-        }
-      }
-      profileForm.setError('root', { message: messageFor(error) });
+      applyServerErrors(error, profileForm.setError, Object.keys(profileSchema.shape));
     }
   });
 
@@ -97,7 +98,11 @@ export function ProfilePage() {
     try {
       await changePassword.mutateAsync(values);
     } catch (error) {
-      passwordForm.setError('root', { message: messageFor(error) });
+      // Includes WEAK_PASSWORD, whose message is the only explanation of *why* the
+      // password was refused. It lands on newPassword when the backend names that field
+      // and in the summary otherwise — either way it is on screen.
+      applyServerErrors(error, passwordForm.setError,
+        ['currentPassword', 'newPassword', 'confirmPassword']);
     }
   });
 
@@ -133,9 +138,7 @@ export function ProfilePage() {
         <Card>
           <CardHeader title="Your details" icon="edit" />
           <form onSubmit={submitProfile} noValidate className="space-y-4 p-4">
-            {profileForm.formState.errors.root && (
-              <Alert tone="danger" live>{profileForm.formState.errors.root.message}</Alert>
-            )}
+            <FormErrorSummary message={profileForm.formState.errors.root?.message} />
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="First name" required
                 error={profileForm.formState.errors.firstName?.message}>
@@ -171,9 +174,7 @@ export function ProfilePage() {
             description="Changing your password does not sign out your other sessions."
           />
           <form onSubmit={submitPassword} noValidate className="space-y-4 p-4">
-            {passwordForm.formState.errors.root && (
-              <Alert tone="danger" live>{passwordForm.formState.errors.root.message}</Alert>
-            )}
+            <FormErrorSummary message={passwordForm.formState.errors.root?.message} />
             <Field label="Current password" required
               error={passwordForm.formState.errors.currentPassword?.message}>
               {({ id, describedBy, invalid }) => (

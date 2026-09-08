@@ -63,8 +63,20 @@ public class AwsConfig {
                 .region(Region.of(properties.getRegion()))
                 .credentialsProvider(credentialsProvider);
         if (usesLocalEndpoint()) {
-            builder.endpointOverride(URI.create(properties.getEndpoint()));
+            builder.endpointOverride(URI.create(properties.getEndpoint()))
+                    // The same path-style setting the client above uses, and for the same
+                    // reason — but it matters more here, because the presigner's output is
+                    // handed to a *browser*. Without it the SDK signs a virtual-host URL:
+                    // http://juriscore-documents.localhost:4566/... — a hostname that
+                    // LocalStack serves but that most resolvers and Chrome will not resolve,
+                    // so the upload fails in the browser while every server-side call
+                    // succeeds. Signing and addressing have to agree: a URL rewritten after
+                    // signing breaks the signature, so the style must be chosen here.
+                    .serviceConfiguration(S3Configuration.builder()
+                            .pathStyleAccessEnabled(true).build());
         }
+        // Real AWS keeps the SDK default (virtual-host addressing), which is what S3
+        // recommends and what path-style deprecation requires.
         return builder.build();
     }
 

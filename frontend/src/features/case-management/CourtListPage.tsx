@@ -18,16 +18,21 @@ import { DataTable } from '@/components/ui/DataTable';
 import { ConfirmDialog, Dialog } from '@/components/ui/Dialog';
 import { Pagination } from '@/components/ui/Pagination';
 import { humanise } from '@/lib/format';
-import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
+import { messageFor } from '@/lib/api/errors';
+import { applyServerErrors } from '@/lib/api/formErrors';
+import { FormErrorSummary } from '@/components/ui/FormErrorSummary';
+import { LIMITS, boundedText, optionalText } from '@/lib/validation';
 import type { Court, CourtType } from '@/types/api';
 
 const COURT_TYPES: CourtType[] = ['SUPREME', 'HIGH', 'DISTRICT', 'TRIBUNAL', 'OTHER'];
 
+// Mirrors CourtRequest. The name is 200 on the backend, not 255 — a 210-character
+// court name used to pass here and come back rejected.
 const schema = z.object({
-  name: z.string().trim().min(1, 'Enter a name').max(255),
+  name: boundedText(LIMITS.NAME, 'Enter a name'),
   courtType: z.enum(['SUPREME', 'HIGH', 'DISTRICT', 'TRIBUNAL', 'OTHER']),
-  addressLine1: z.string().max(255),
-  addressLine2: z.string().max(255),
+  addressLine1: optionalText(LIMITS.ADDRESS),
+  addressLine2: optionalText(LIMITS.ADDRESS),
   city: z.string().max(120),
   state: z.string().max(120),
   country: z.string().max(120),
@@ -221,10 +226,7 @@ function CourtDialog({ court, onClose, onSaved }: {
     try {
       await save.mutateAsync(values);
     } catch (error) {
-      for (const [field, message] of Object.entries(fieldErrorsOf(error))) {
-        if (field in schema.shape) setError(field as keyof Values, { message });
-      }
-      setError('root', { message: messageFor(error) });
+      applyServerErrors(error, setError, Object.keys(schema.shape));
     }
   });
 
@@ -235,11 +237,7 @@ function CourtDialog({ court, onClose, onSaved }: {
       footer={<span />}
     >
       <form onSubmit={submit} noValidate className="space-y-4">
-        {errors.root && (
-          <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800 ring-1 ring-inset ring-red-200">
-            {errors.root.message}
-          </div>
-        )}
+        <FormErrorSummary message={errors.root?.message} />
         <Field label="Name" error={errors.name?.message} required>
           {({ id, describedBy, invalid }) => (
             <Input id={id} autoFocus aria-describedby={describedBy} invalid={invalid}

@@ -7,13 +7,129 @@ import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import { useToast } from '@/components/ui/Toast';
 import {
-  Avatar, Badge, Button, Card, CardHeader, Detail, DetailList, Field, Select,
+  Alert, Avatar, Badge, Button, Card, CardHeader, Detail, DetailList, Field, Select,
 } from '@/components/ui/primitives';
 import { AsyncSection, EmptyState, TableSkeleton } from '@/components/ui/states';
-import { ConfirmDialog, Dialog } from '@/components/ui/Dialog';
+import { Dialog } from '@/components/ui/Dialog';
 import { formatDate, formatDateTime } from '@/lib/format';
 import { messageFor } from '@/lib/api/errors';
 import type { CaseAssignment, LegalCase } from '@/types/api';
+
+/**
+ * Removing a lawyer, including the one leading the matter.
+ *
+ * The backend keeps a hard invariant: a staffed matter has exactly one lead. `unassign`
+ * therefore refuses to remove the lead unless the same request names a successor already
+ * assigned to the matter, and refuses outright when the lead is the only lawyer on it.
+ *
+ * The old confirmation dialog knew none of that. It offered "Remove" on the lead, said the
+ * matter would be "left without a lead until another is named" — which is a state the
+ * platform will not enter — and collected a 400 for its trouble. Presenting an action that
+ * is guaranteed to fail is worse than not offering it: the user reasonably concludes the
+ * application is broken.
+ *
+ * So the dialog now asks for what the server needs. Removing a non-lead is a plain
+ * confirmation; removing the lead requires picking the successor, and where there is
+ * nobody to pick, the action is explained rather than offered. The invariant is unchanged
+ * and still enforced server-side — this only stops the interface from lying about it.
+ */
+function RemoveLawyerDialog({ caseId, assignment, others, nameOf, onClose }: {
+  caseId: string;
+  assignment: CaseAssignment | null;
+  others: CaseAssignment[];
+  nameOf: (userId: string) => string;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const [successor, setSuccessor] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const removingLead = assignment?.lead ?? false;
+  const noSuccessor = removingLead && others.length === 0;
+
+  const unassign = useMutation({
+    mutationFn: () => casesApi.unassign(
+      caseId,
+      assignment!.lawyerUserId,
+      removingLead ? successor : undefined,
+    ),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: keys.cases.assignments(caseId) });
+      await queryClient.invalidateQueries({ queryKey: keys.cases.timeline(caseId, 0) });
+      toast.success(removingLead
+        ? `Removed; ${nameOf(successor)} now leads the matter`
+        : 'Lawyer removed from the matter');
+      close();
+    },
+    onError: (error) => setProblem(messageFor(error)),
+  });
+
+  function close() {
+    setSuccessor('');
+    setProblem(null);
+    onClose();
+  }
+
+  if (!assignment) return null;
+
+  return (
+    <Dialog
+      open
+      onClose={close}
+      title="Remove from this matter?"
+      description={removingLead
+        ? 'They lead this matter, so somebody else has to take it on.'
+        : 'They will no longer be assigned to this matter. The change is recorded on its timeline.'}
+      footer={<span />}
+    >
+      <div className="space-y-4">
+        {problem && <Alert tone="danger" live>{problem}</Alert>}
+
+        {noSuccessor && (
+          <Alert tone="warning" title="There is nobody to take the lead">
+            {nameOf(assignment.lawyerUserId)} is the only lawyer on this matter, and a
+            matter cannot be left staffed without a lead. Assign another lawyer first, then
+            remove this one.
+          </Alert>
+        )}
+
+        {removingLead && others.length > 0 && (
+          <Field label="New lead lawyer" required
+            hint="They must already be assigned to this matter.">
+            {({ id, describedBy }) => (
+              <Select id={id} aria-describedby={describedBy} value={successor}
+                onChange={(event) => setSuccessor(event.target.value)}>
+                <option value="">Choose who takes the lead…</option>
+                {others.map((other) => (
+                  <option key={other.id} value={other.lawyerUserId}>
+                    {nameOf(other.lawyerUserId)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={close} disabled={unassign.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            loading={unassign.isPending}
+            // Disabled exactly when the server would refuse: no successor available, or
+            // one is required and has not been chosen.
+            disabled={noSuccessor || (removingLead && successor === '')}
+            onClick={() => unassign.mutate()}
+          >
+            Remove
+          </Button>
+        </div>
+      </div>
+    </Dialog>
+  );
+}
 
 function AssignLawyerDialog({ caseId, open, onClose, assigned }: {
   caseId: string; open: boolean; onClose: () => void; assigned: CaseAssignment[];
@@ -94,8 +210,6 @@ function AssignLawyerDialog({ caseId, open, onClose, assigned }: {
 
 export function CaseOverviewTab({ legalCase }: { legalCase: LegalCase }) {
   const { user } = useAuth();
-  const toast = useToast();
-  const queryClient = useQueryClient();
   const [assigning, setAssigning] = useState(false);
   const [removing, setRemoving] = useState<CaseAssignment | null>(null);
 
@@ -107,20 +221,6 @@ export function CaseOverviewTab({ legalCase }: { legalCase: LegalCase }) {
   const members = useQuery({
     queryKey: keys.users.list({ all: true }),
     queryFn: () => usersApi.list({ size: 200 }),
-  });
-
-  const unassign = useMutation({
-    mutationFn: (assignment: CaseAssignment) =>
-      casesApi.unassign(legalCase.id, assignment.lawyerUserId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: keys.cases.assignments(legalCase.id) });
-      setRemoving(null);
-      toast.success('Lawyer removed from the matter');
-    },
-    onError: (error) => {
-      setRemoving(null);
-      toast.error(messageFor(error));
-    },
   });
 
   const nameOf = (userId: string) =>
@@ -210,16 +310,13 @@ export function CaseOverviewTab({ legalCase }: { legalCase: LegalCase }) {
         assigned={assignments.data ?? []}
       />
 
-      <ConfirmDialog
-        open={removing !== null}
+      <RemoveLawyerDialog
+        caseId={legalCase.id}
+        assignment={removing}
+        others={(assignments.data ?? []).filter(
+          (other) => other.lawyerUserId !== removing?.lawyerUserId)}
+        nameOf={nameOf}
         onClose={() => setRemoving(null)}
-        onConfirm={() => removing && unassign.mutate(removing)}
-        busy={unassign.isPending}
-        title="Remove from this matter?"
-        description={removing?.lead
-          ? 'They are the lead lawyer. Removing them leaves the matter without a lead until another is named.'
-          : 'They will no longer be assigned to this matter. The change is recorded on its timeline.'}
-        confirmLabel="Remove"
       />
     </div>
   );

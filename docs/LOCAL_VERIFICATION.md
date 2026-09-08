@@ -319,6 +319,60 @@ Startup is complete when the log shows `Started JurisCoreApplication`. Flyway lo
 > writes S3 or SQS; the clients are configured but never called. If LocalStack is down the
 > application starts and serves normally — only Phase 4 makes it a real dependency.
 
+### Document upload needs LocalStack, and needs it reachable from the browser
+
+From Phase 4 onwards, uploading a document is not a server-side operation. The flow is:
+
+1. `POST /api/v1/cases/{id}/documents` registers the row and returns a **presigned PUT URL**
+2. **the browser** sends the bytes straight to that URL — the file never passes through
+   Spring Boot
+3. `POST /api/v1/documents/{id}/complete` confirms they landed
+
+Step 2 is the one that makes LocalStack a hard local dependency: with it stopped, the first
+two steps still succeed and the upload dies at the PUT, leaving a document stuck in
+`UPLOADING`. Start it before trying an upload:
+
+```bash
+docker compose up -d localstack
+docker compose exec -T localstack awslocal s3 ls        # juriscore-documents must exist
+```
+
+**Addressing.** The presigned URL must be path-style against a local endpoint —
+`http://localhost:4566/juriscore-documents/...`, not
+`http://juriscore-documents.localhost:4566/...`. The virtual-host form is what the AWS SDK
+produces by default, and while LocalStack serves it, most resolvers and browsers will not
+resolve that hostname, so the upload fails in the browser while every server-side call
+keeps working. `AwsConfig` therefore sets `pathStyleAccessEnabled(true)` on **both** the
+`S3Client` and the `S3Presigner` whenever `juriscore.aws.endpoint` is set. The host is part
+of the SigV4 signature, so this cannot be corrected by rewriting the URL afterwards — it
+has to be decided when the URL is signed. `AwsConfigTest` pins both halves: path-style
+locally, and the SDK's virtual-host default for real AWS, where path-style is deprecated.
+
+If an upload fails in the browser, check the URL shape first:
+
+```bash
+# The presigned URL, from the register response
+curl -s -X POST "http://localhost:8080/api/v1/cases/$CASE_ID/documents" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"filename":"petition.pdf","contentType":"application/pdf","fileSize":6}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["uploadUrl"])'
+# expect: http://localhost:4566/juriscore-documents/...
+```
+
+**What the server will accept.** `DocumentUploadPolicy` refuses anything outside its
+allowlist, and the browser mirrors those rules in `frontend/src/lib/validation.ts` so a
+file is refused before a row is created. The list lives in
+`juriscore.documents.allowed-content-types` (PDF, Word, Excel, RTF, plain text, CSV, JPEG,
+PNG, TIFF), with a 50 MB ceiling and a 255-character filename limit. Changing it in
+`application.yml` means changing `ALLOWED_CONTENT_TYPES` in that frontend file too — they
+are asserted against each other in `validation.test.ts`.
+
+**Credentials.** Local access keys come from `juriscore.aws.access-key` / `secret-key`,
+which default to LocalStack's `test`/`test` and are read *only* when an endpoint override
+is present. Deployed environments leave `juriscore.aws.endpoint` empty and authenticate
+with the task role; no production bucket name or credential is committed anywhere in this
+repository.
+
 ---
 
 ## 6. Health check

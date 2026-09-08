@@ -55,6 +55,23 @@ describe('hearing transitions', () => {
   it('lets an adjourned hearing be relisted', () => {
     expect(nextHearingStatuses('ADJOURNED')).toContain('SCHEDULED');
   });
+
+  it('does not offer to complete an adjourned hearing', () => {
+    // HearingStatusPolicy allows ADJOURNED → {SCHEDULED, CANCELLED} and nothing else. A
+    // hearing that was adjourned did not happen, so there is nothing to complete until it
+    // is relisted; the UI used to offer it and collect a 409 every time.
+    expect(nextHearingStatuses('ADJOURNED')).toEqual(['SCHEDULED', 'CANCELLED']);
+    expect(nextHearingStatuses('ADJOURNED')).not.toContain('COMPLETED');
+  });
+
+  it('offers every real ending from a scheduled hearing', () => {
+    expect(nextHearingStatuses('SCHEDULED')).toEqual(['COMPLETED', 'ADJOURNED', 'CANCELLED']);
+  });
+
+  it('treats completed and cancelled as terminal', () => {
+    expect(nextHearingStatuses('COMPLETED')).toEqual([]);
+    expect(nextHearingStatuses('CANCELLED')).toEqual([]);
+  });
 });
 
 describe('invoice lifecycle gates', () => {

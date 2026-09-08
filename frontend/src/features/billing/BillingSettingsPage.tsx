@@ -9,28 +9,33 @@ import { useUnsavedChangesWarning } from '@/lib/api/hooks';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
 import {
-  Alert, Button, Card, CardHeader, Field, Input, Textarea,
+  Button, Card, CardHeader, Field, Input, Textarea,
 } from '@/components/ui/primitives';
 import { ErrorState, TableSkeleton } from '@/components/ui/states';
-import { fieldErrorsOf, messageFor } from '@/lib/api/errors';
+import { applyServerErrors } from '@/lib/api/formErrors';
+import { FormErrorSummary } from '@/components/ui/FormErrorSummary';
+import { LIMITS, currencyCode, invoicePrefix, optionalText } from '@/lib/validation';
 
+// Mirrors UpdateBillingProfileRequest. Three of these were wrong: legalName is 200 not
+// 255, billingPhone is 40 not 32, and invoicePrefix is a @Pattern allowing up to twelve
+// upper-case characters — the old 1-10 rule refused prefixes the platform accepts.
 const schema = z.object({
-  legalName: z.string().max(255),
-  taxRegistration: z.string().max(64),
-  billingEmail: z.string().max(255).refine(
+  legalName: optionalText(LIMITS.NAME),
+  taxRegistration: optionalText(LIMITS.TAX_REGISTRATION),
+  billingEmail: z.string().max(LIMITS.EMAIL).refine(
     (value) => value === '' || z.string().email().safeParse(value).success,
     'Enter a valid email address',
   ),
-  billingPhone: z.string().max(32),
-  addressLine1: z.string().max(255),
-  addressLine2: z.string().max(255),
-  city: z.string().max(120),
-  state: z.string().max(120),
-  country: z.string().max(120),
-  postalCode: z.string().max(20),
-  defaultCurrency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'Use a three-letter code'),
-  invoicePrefix: z.string().trim().min(1, 'A prefix is required').max(10),
-  invoiceNotes: z.string().max(2000),
+  billingPhone: optionalText(LIMITS.PHONE),
+  addressLine1: optionalText(LIMITS.ADDRESS),
+  addressLine2: optionalText(LIMITS.ADDRESS),
+  city: optionalText(LIMITS.LOCALITY),
+  state: optionalText(LIMITS.LOCALITY),
+  country: optionalText(LIMITS.LOCALITY),
+  postalCode: optionalText(LIMITS.POSTAL_CODE),
+  defaultCurrency: currencyCode,
+  invoicePrefix,
+  invoiceNotes: optionalText(LIMITS.NOTES),
 });
 type Values = z.infer<typeof schema>;
 
@@ -106,10 +111,7 @@ export function BillingSettingsPage() {
     try {
       await save.mutateAsync(values);
     } catch (error) {
-      for (const [field, message] of Object.entries(fieldErrorsOf(error))) {
-        if (field in schema.shape) setError(field as keyof Values, { message });
-      }
-      setError('root', { message: messageFor(error) });
+      applyServerErrors(error, setError, Object.keys(schema.shape));
     }
   });
 
@@ -126,7 +128,7 @@ export function BillingSettingsPage() {
         <Card><ErrorState error={query.error} onRetry={() => query.refetch()} /></Card>
       ) : (
         <form onSubmit={submit} noValidate className="space-y-4">
-          {errors.root && <Alert tone="danger" live>{errors.root.message}</Alert>}
+          <FormErrorSummary message={errors.root?.message} />
 
           <Card>
             <CardHeader title="The firm" icon="courts"

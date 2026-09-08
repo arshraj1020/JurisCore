@@ -16,6 +16,10 @@ import { ConfirmDialog, Dialog } from '@/components/ui/Dialog';
 import { DocumentStatusBadge } from '@/components/ui/StatusBadge';
 import { formatDateTime, formatFileSize } from '@/lib/format';
 import { ApiError, messageFor } from '@/lib/api/errors';
+import {
+  ACCEPT_ATTRIBUTE, LIMITS, MAX_FILE_SIZE, fileSizeProblem, filenameProblem,
+  isAllowedContentType, normaliseContentType,
+} from '@/lib/validation';
 import type { CaseDocument } from '@/types/api';
 
 /**
@@ -45,7 +49,12 @@ interface UploadJob {
   expired?: boolean;
 }
 
-const MAX_BYTES = 50 * 1024 * 1024;
+/**
+ * DocumentProperties.maxFileSize, imported rather than restated so the two cannot drift.
+ * The backend checks it twice — when the link is issued and again against the size storage
+ * reports — so this is a courtesy, not the control.
+ */
+const MAX_BYTES = MAX_FILE_SIZE;
 
 /** A short type label for the row: the extension if there is one, else the MIME subtype. */
 function extensionOf(filename: string, contentType: string): string {
@@ -113,15 +122,41 @@ export function CaseDocumentsTab({ caseId }: { caseId: string }) {
     }
   }, [caseId, patchJob, queryClient, toast]);
 
+  /**
+   * Every rule `DocumentUploadPolicy` applies, applied here first.
+   *
+   * The picker's `accept` attribute is a filter, not a guarantee — a user can switch it to
+   * "All files", and some systems report no MIME type at all — so the type is checked
+   * rather than assumed. Refusing here matters because the flow is register → PUT →
+   * complete: without this check the browser creates a document row and asks for a
+   * presigned link before the server ever sees the content type, so a rejected file leaves
+   * a failed upload behind instead of a message.
+   *
+   * The order follows the backend's: name, then type, then size.
+   */
+  const rejectionFor = (file: File): string | null => {
+    const name = filenameProblem(file.name);
+    if (name) return `${file.name}: ${name.charAt(0).toLowerCase()}${name.slice(1)}`;
+    if (!isAllowedContentType(file.type)) {
+      return file.type
+        ? `${file.name} is a ${normaliseContentType(file.type)} file, which is not accepted.`
+        : `${file.name} has no recognisable file type, so it cannot be accepted.`;
+    }
+    const size = fileSizeProblem(file.size);
+    if (size) {
+      return file.size === 0
+        ? `${file.name} is empty.`
+        : `${file.name} is larger than ${formatFileSize(MAX_BYTES)}.`;
+    }
+    return null;
+  };
+
   const addFiles = (files: FileList | null) => {
     if (!files) return;
     for (const file of Array.from(files)) {
-      if (file.size === 0) {
-        toast.error(`${file.name} is empty.`);
-        continue;
-      }
-      if (file.size > MAX_BYTES) {
-        toast.error(`${file.name} is larger than ${formatFileSize(MAX_BYTES)}.`);
+      const rejection = rejectionFor(file);
+      if (rejection) {
+        toast.error(rejection);
         continue;
       }
       const key = `${file.name}:${file.size}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
@@ -162,6 +197,9 @@ export function CaseDocumentsTab({ caseId }: { caseId: string }) {
               ref={inputRef}
               type="file"
               multiple
+              // A hint to the file picker, mirroring the server's allowlist. Not a
+              // control: `rejectionFor` is what actually refuses a file.
+              accept={ACCEPT_ATTRIBUTE}
               className="sr-only"
               onChange={(event) => addFiles(event.target.files)}
               aria-label="Choose files to upload"
@@ -393,6 +431,14 @@ function EditDocumentDialog({ doc, onClose, onSaved }: {
   const [filename, setFilename] = useState(doc.filename);
   const [description, setDescription] = useState(doc.description ?? '');
 
+  // The same rules the upload path applies, because `UpdateDocumentRequest` runs the same
+  // policy: a rename can put a path separator or 300 characters into the name just as
+  // easily as an upload can.
+  const nameProblem = filenameProblem(filename);
+  const descriptionProblem = description.length > LIMITS.NOTES
+    ? `Use at most ${LIMITS.NOTES} characters`
+    : null;
+
   const save = useMutation({
     // `version` carries the optimistic lock; a stale copy is refused with 409, not merged.
     mutationFn: () => documentsApi.rename(
@@ -412,7 +458,7 @@ function EditDocumentDialog({ doc, onClose, onSaved }: {
           <Button variant="secondary" onClick={onClose} disabled={save.isPending}>Cancel</Button>
           <Button
             loading={save.isPending}
-            disabled={filename.trim().length === 0}
+            disabled={nameProblem !== null || descriptionProblem !== null}
             onClick={() => save.mutate()}
           >
             Save
@@ -421,15 +467,17 @@ function EditDocumentDialog({ doc, onClose, onSaved }: {
       }
     >
       <div className="space-y-4">
-        <Field label="Filename" required>
-          {({ id }) => (
-            <Input id={id} autoFocus value={filename}
+        <Field label="Filename" required error={nameProblem ?? undefined}>
+          {({ id, describedBy, invalid }) => (
+            <Input id={id} autoFocus value={filename} aria-describedby={describedBy}
+              invalid={invalid}
               onChange={(event) => setFilename(event.target.value)} />
           )}
         </Field>
-        <Field label="Description">
-          {({ id }) => (
-            <Textarea id={id} rows={3} value={description}
+        <Field label="Description" error={descriptionProblem ?? undefined}>
+          {({ id, describedBy, invalid }) => (
+            <Textarea id={id} rows={3} value={description} aria-describedby={describedBy}
+              invalid={invalid}
               onChange={(event) => setDescription(event.target.value)} />
           )}
         </Field>

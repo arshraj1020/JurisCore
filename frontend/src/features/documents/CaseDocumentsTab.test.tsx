@@ -154,3 +154,109 @@ describe('CaseDocumentsTab — presigned upload', () => {
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
   });
 });
+
+describe('CaseDocumentsTab — refusing a file the backend would reject', () => {
+  /**
+   * The upload is register → PUT → complete, so a file the server will refuse is not a
+   * harmless mistake: the browser first creates a document row and asks for a presigned
+   * link, and the refusal arrives after that row exists. Every check below therefore
+   * happens *before* the first request, and the assertion that no registration occurred is
+   * as much the point as the message.
+   */
+  function file(name: string, type: string, size = 6): File {
+    const created = new File(['filing'], name, { type });
+    // `File` computes its own size from the content; overriding it is the only way to test
+    // the 50 MB boundary without allocating 50 MB.
+    Object.defineProperty(created, 'size', { value: size });
+    return created;
+  }
+
+  async function choose(chosen: File) {
+    let registrations = 0;
+    server.use(http.post(`/api/v1/cases/${CASE_ID}/documents`, () => {
+      registrations += 1;
+      return HttpResponse.json(envelope({}), { status: 500 });
+    }));
+
+    mount('FIRM_ADMIN');
+    await screen.findByRole('button', { name: 'Upload files' });
+    // `applyAccept: false` because the `accept` attribute is only a hint: a user can pick
+    // "All files" in the system dialog and choose anything. The code under test is what
+    // has to refuse it, so the test has to be able to get past the hint.
+    await userEvent.upload(screen.getByLabelText('Choose files to upload'), chosen,
+      { applyAccept: false });
+    return () => registrations;
+  }
+
+  it('refuses a content type outside the server allowlist, before registering anything', async () => {
+    const registrations = await choose(file('payload.exe', 'application/x-msdownload'));
+
+    expect(await screen.findByText(/not accepted/i)).toBeInTheDocument();
+    expect(registrations()).toBe(0);
+  });
+
+  it('refuses a file the browser could not type at all', async () => {
+    const registrations = await choose(file('mystery.bin', ''));
+
+    expect(await screen.findByText(/no recognisable file type/i)).toBeInTheDocument();
+    expect(registrations()).toBe(0);
+  });
+
+  it('refuses a file larger than the server will accept', async () => {
+    const registrations = await choose(file('huge.pdf', 'application/pdf', 52_428_801));
+
+    expect(await screen.findByText(/larger than/i)).toBeInTheDocument();
+    expect(registrations()).toBe(0);
+  });
+
+  it('refuses an empty file', async () => {
+    const registrations = await choose(file('empty.pdf', 'application/pdf', 0));
+
+    expect(await screen.findByText(/is empty/i)).toBeInTheDocument();
+    expect(registrations()).toBe(0);
+  });
+
+  it('refuses a filename the server policy forbids', async () => {
+    const registrations = await choose(file('..secrets.pdf', 'application/pdf'));
+
+    expect(await screen.findByText(/must not contain/i)).toBeInTheDocument();
+    expect(registrations()).toBe(0);
+  });
+
+  it('accepts a type the allowlist names, charset parameter and all', async () => {
+    let registrations = 0;
+    server.use(
+      http.post(`/api/v1/cases/${CASE_ID}/documents`, () => {
+        registrations += 1;
+        return HttpResponse.json(envelope({
+          document: document({ filename: 'notes.txt', contentType: 'text/plain' }),
+          uploadUrl: UPLOAD_URL,
+          uploadMethod: 'PUT',
+          requiredContentType: 'text/plain',
+          expiresAt: '2026-08-01T09:15:00Z',
+          expiresInSeconds: 900,
+        }));
+      }),
+      // The rest of the flow is stubbed so the accepted file runs to completion rather
+      // than leaving an unhandled request behind it.
+      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+      http.post(`/api/v1/documents/${DOC_ID}/complete`, () =>
+        HttpResponse.json(envelope(document({ status: 'AVAILABLE' })))),
+    );
+
+    mount('FIRM_ADMIN');
+    await screen.findByRole('button', { name: 'Upload files' });
+    await userEvent.upload(screen.getByLabelText('Choose files to upload'),
+      file('notes.txt', 'text/plain; charset=utf-8'), { applyAccept: false });
+
+    await waitFor(() => expect(registrations).toBe(1));
+  });
+
+  it('hints the allowlist to the file picker', async () => {
+    mount('FIRM_ADMIN');
+
+    const input = await screen.findByLabelText('Choose files to upload');
+    expect(input).toHaveAttribute('accept', expect.stringContaining('application/pdf'));
+    expect(input).toHaveAttribute('accept', expect.stringContaining('.pdf'));
+  });
+});
