@@ -175,8 +175,17 @@ export interface LegalCase {
 }
 
 export interface CreateCaseRequest { title: string; description?: string | null; clientId: string }
+/**
+ * `clientId` is required, matching `@NotNull UUID clientId` on `UpdateCaseRequest`.
+ *
+ * It was optional here, which let TypeScript compile `update(id, { title, version })` — a
+ * body the server answers with 400 VALIDATION_FAILED. The endpoint replaces the matter's
+ * details rather than patching them, so the client has to be restated even when it has not
+ * changed; making the type say so is the only thing that stops the compiler waving through
+ * a call that cannot succeed.
+ */
 export interface UpdateCaseRequest {
-  title: string; description?: string | null; clientId?: string | null; version: number;
+  title: string; description?: string | null; clientId: string; version: number;
 }
 
 export type CaseEventType =

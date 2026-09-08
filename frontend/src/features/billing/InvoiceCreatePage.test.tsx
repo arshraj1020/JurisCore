@@ -234,3 +234,92 @@ describe('InvoiceCreatePage — the estimate stays an estimate', () => {
     expect(within(estimate).queryByText(/^-/)).not.toBeInTheDocument();
   });
 });
+
+describe('InvoiceCreatePage — a failed client query is not an empty firm', () => {
+  /**
+   * The same distinction the hearing dialog draws. A failed `/clients` request used to
+   * leave the page with an enabled dropdown, no options and no message: identical on screen
+   * to a firm that has not added a client yet, and with no way to try again. An error is
+   * not an empty list.
+   */
+  function mountWithBrokenClients() {
+    server.use(
+      http.post('/api/v1/auth/refresh', () => HttpResponse.json(envelope({
+        accessToken: 'access-1',
+        refreshToken: 'refresh-1',
+        tokenType: 'Bearer',
+        expiresIn: 300,
+        user: makeUser('FIRM_ADMIN'),
+      }))),
+      http.get('/api/v1/cases', () => HttpResponse.json(envelope(pageOf([])))),
+      http.get('/api/v1/clients', () => HttpResponse.json({
+        success: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Something went wrong on the server.',
+          timestamp: '2026-09-08T00:00:00Z',
+        },
+      }, { status: 500 })),
+    );
+    window.localStorage.setItem('juriscore.refreshToken', 'refresh-0');
+    return renderWithAuth(<InvoiceCreatePage />, { route: '/invoices/new' });
+  }
+
+  it('says the clients could not be loaded', async () => {
+    mountWithBrokenClients();
+
+    expect(await screen.findByText(/couldn.t load your clients/i)).toBeInTheDocument();
+  });
+
+  it('does not present an empty dropdown as though the firm had no clients', async () => {
+    mountWithBrokenClients();
+
+    await screen.findByText(/couldn.t load your clients/i);
+    // Choosing from an empty list and pressing Save would fail for a reason unrelated to
+    // what actually went wrong.
+    await waitFor(() => expect(screen.getByLabelText(/^Client/)).toBeDisabled());
+    expect(screen.getByRole('option', { name: /clients unavailable/i })).toBeInTheDocument();
+  });
+
+  it('offers a retry that recovers once the server answers', async () => {
+    let attempt = 0;
+    server.use(
+      http.post('/api/v1/auth/refresh', () => HttpResponse.json(envelope({
+        accessToken: 'access-1',
+        refreshToken: 'refresh-1',
+        tokenType: 'Bearer',
+        expiresIn: 300,
+        user: makeUser('FIRM_ADMIN'),
+      }))),
+      http.get('/api/v1/cases', () => HttpResponse.json(envelope(pageOf([])))),
+      http.get('/api/v1/clients', () => {
+        attempt += 1;
+        return attempt === 1
+          ? HttpResponse.json({
+            success: false,
+            error: {
+              code: 'INTERNAL_ERROR',
+              message: 'Something went wrong on the server.',
+              timestamp: '2026-09-08T00:00:00Z',
+            },
+          }, { status: 500 })
+          : HttpResponse.json(envelope(pageOf([{
+            id: CLIENT_ID,
+            displayName: 'Rao & Company',
+            clientType: 'CORPORATE',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+            version: 0,
+          }])));
+      }),
+    );
+    window.localStorage.setItem('juriscore.refreshToken', 'refresh-0');
+    renderWithAuth(<InvoiceCreatePage />, { route: '/invoices/new' });
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByRole('option', { name: 'Rao & Company' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText(/couldn.t load your clients/i)).not.toBeInTheDocument());
+  });
+});

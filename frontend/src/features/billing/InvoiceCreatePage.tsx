@@ -15,6 +15,7 @@ import {
   Alert, Button, Card, CardBody, CardHeader, Field, Input, Select, Textarea,
 } from '@/components/ui/primitives';
 import { estimateTotals } from '@/lib/money';
+import { messageFor } from '@/lib/api/errors';
 import { applyServerErrors } from '@/lib/api/formErrors';
 import { FormErrorSummary } from '@/components/ui/FormErrorSummary';
 import {
@@ -238,11 +239,32 @@ export function InvoiceCreatePage() {
         <Card>
           <CardHeader title="Who is being billed" icon="clients" />
           <div className="grid gap-4 p-4 sm:grid-cols-2">
+            {/*
+              A failed client query used to be indistinguishable from a firm with no
+              clients: an empty dropdown, no explanation, and no way to try again. The same
+              distinction the hearing dialog draws between "none on file" and "couldn't
+              load" applies here — an error is not an empty list.
+            */}
+            {clients.isError && (
+              <div className="sm:col-span-2">
+                <Alert tone="danger" live>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>Couldn&rsquo;t load your clients. {messageFor(clients.error)}</span>
+                    <Button size="xs" variant="secondary" loading={clients.isFetching}
+                      onClick={() => void clients.refetch()}>
+                      Retry
+                    </Button>
+                  </div>
+                </Alert>
+              </div>
+            )}
             <Field label="Client" error={errors.clientId?.message} required>
               {({ id, describedBy, invalid }) => (
                 <Select id={id} aria-describedby={describedBy} invalid={invalid}
-                  disabled={clients.isPending} {...register('clientId')}>
-                  <option value="">Choose a client…</option>
+                  disabled={clients.isPending || clients.isError} {...register('clientId')}>
+                  <option value="">
+                    {clients.isError ? 'Clients unavailable' : 'Choose a client…'}
+                  </option>
                   {clients.data?.items.map((client) => (
                     <option key={client.id} value={client.id}>{client.displayName}</option>
                   ))}

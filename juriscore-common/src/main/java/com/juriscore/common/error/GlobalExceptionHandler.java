@@ -6,6 +6,7 @@ import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,6 +25,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,6 +40,9 @@ import java.util.UUID;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    /** SQLState 23505, "unique_violation" — the only integrity error a user can resolve. */
+    private static final String UNIQUE_VIOLATION = "23505";
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiErrorResponse> handleApiException(ApiException ex, HttpServletRequest request) {
@@ -128,10 +133,61 @@ public class GlobalExceptionHandler {
         return status(ErrorCode.CONCURRENT_MODIFICATION, null);
     }
 
+    /**
+     * A write the database refused — but only one kind of refusal is the user's fault.
+     *
+     * <p>This used to answer {@code DUPLICATE_RESOURCE} for every
+     * {@link DataIntegrityViolationException}, which is wrong in both directions. A
+     * not-null violation, a foreign key pointing at a row that is not there, or a check
+     * constraint the service failed to enforce are all <em>defects</em>: the application
+     * sent the database something it should never have sent. Reporting them as 409 "that
+     * already exists" tells the user to rename something that has no name conflict, and it
+     * hides the defect from whoever is watching error rates, because a 409 reads as a
+     * routine conflict rather than a bug.
+     *
+     * <p>So the SQLState decides. {@code 23505} — unique violation — is the genuine
+     * duplicate, and the only one a different value would fix. Everything else is treated
+     * exactly like an unhandled exception: 500, an incident id, and the full stack in the
+     * log where it belongs.
+     */
     @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<ApiErrorResponse> handleDataIntegrity(DataIntegrityViolationException ex) {
-        log.warn("Data integrity violation", ex);
-        return status(ErrorCode.DUPLICATE_RESOURCE, null);
+    public ResponseEntity<ApiErrorResponse> handleDataIntegrity(DataIntegrityViolationException ex,
+                                                                HttpServletRequest request) {
+        if (isUniqueViolation(ex)) {
+            log.warn("Unique constraint violation on {} {}", request.getMethod(),
+                    request.getRequestURI());
+            return status(ErrorCode.DUPLICATE_RESOURCE, null);
+        }
+        return internalError(ex, request, "Data integrity violation");
+    }
+
+    /**
+     * Whether the database refused this write because something was already there.
+     *
+     * <p>Two signals, because neither is complete on its own. Spring translates a unique
+     * violation to {@link DuplicateKeyException} when it recognises the driver's error, and
+     * that subclass is the clearest statement of intent available. When translation does
+     * not produce it — Hibernate wraps its own constraint exception, and the driver's code
+     * survives only on the underlying {@link SQLException} — the SQLState is read directly
+     * from the cause chain. {@code 23505} is "unique_violation" in the SQL standard's class
+     * 23 (integrity constraint violation), and its siblings are deliberately excluded:
+     * {@code 23502} not-null, {@code 23503} foreign key and {@code 23514} check are all
+     * application defects rather than user conflicts.
+     */
+    private static boolean isUniqueViolation(DataIntegrityViolationException ex) {
+        if (ex instanceof DuplicateKeyException) {
+            return true;
+        }
+        for (Throwable cause = ex; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sqlException
+                    && UNIQUE_VIOLATION.equals(sqlException.getSQLState())) {
+                return true;
+            }
+            if (cause.getCause() == cause) {
+                break;
+            }
+        }
+        return false;
     }
 
     @ExceptionHandler(AccessDeniedException.class)
@@ -146,8 +202,22 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpected(Exception ex, HttpServletRequest request) {
+        return internalError(ex, request, "Unhandled exception");
+    }
+
+    /**
+     * The one way an unexpected failure reaches a caller: a generic message and an incident
+     * id, with everything else kept in the log.
+     *
+     * <p>The id is the whole point of the pair. It is the only thing that connects what the
+     * user saw to the stack trace that explains it, and it is the only internal detail that
+     * crosses the boundary — no exception class, no SQL, no constraint name, since those
+     * describe the schema to whoever is probing it.
+     */
+    private ResponseEntity<ApiErrorResponse> internalError(Exception ex, HttpServletRequest request,
+                                                           String what) {
         String incidentId = UUID.randomUUID().toString();
-        log.error("Unhandled exception [incident={}] on {} {}", incidentId, request.getMethod(),
+        log.error("{} [incident={}] on {} {}", what, incidentId, request.getMethod(),
                 request.getRequestURI(), ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ApiErrorResponse.of(ErrorCode.INTERNAL_ERROR.name(),

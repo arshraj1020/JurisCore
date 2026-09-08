@@ -78,7 +78,7 @@ describe('BillingSettingsPage — the save is a full replacement', () => {
     mount();
 
     // Change one field, exactly as a user tweaking the prefix would.
-    const prefix = await screen.findByLabelText(/^Invoice prefix/);
+    const prefix = await screen.findByLabelText(/^Invoice number prefix/);
     await userEvent.clear(prefix);
     await userEvent.type(prefix, 'SA');
     await userEvent.click(screen.getByRole('button', { name: /save/i }));
@@ -95,7 +95,7 @@ describe('BillingSettingsPage — the save is a full replacement', () => {
     const captured = capturePatch();
     mount();
 
-    const prefix = await screen.findByLabelText(/^Invoice prefix/);
+    const prefix = await screen.findByLabelText(/^Invoice number prefix/);
     await userEvent.clear(prefix);
     await userEvent.type(prefix, 'SA');
     await userEvent.click(screen.getByRole('button', { name: /save/i }));
@@ -118,7 +118,11 @@ describe('BillingSettingsPage — the save is a full replacement', () => {
     const captured = capturePatch();
     mount();
 
-    await screen.findByLabelText(/^Invoice prefix/);
+    // The form only submits when something changed, so make a change first — the assertion
+    // is about the version travelling with the save, not about saving a pristine form.
+    const prefix = await screen.findByLabelText(/^Invoice number prefix/);
+    await userEvent.clear(prefix);
+    await userEvent.type(prefix, 'SA');
     await userEvent.click(screen.getByRole('button', { name: /save/i }));
 
     await waitFor(() => expect(captured.body).not.toBeNull());
