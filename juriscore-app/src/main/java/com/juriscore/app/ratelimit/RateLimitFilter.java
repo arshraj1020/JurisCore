@@ -26,6 +26,26 @@ import java.io.IOException;
  * Anonymous traffic, including every sign-in attempt, falls back to the client address,
  * which is taken from the connection and never from a header the caller controls. See
  * {@link #clientAddress}.
+ *
+ * <h2>Where this sits, and what it therefore protects</h2>
+ *
+ * <p>"After authentication" means after Spring Security's chain, which Boot registers at
+ * order {@code -100}, well ahead of this filter's {@code @Order(50)}. For a sign-in that
+ * ordering is what matters: {@code /api/v1/auth/login} is {@code permitAll}, so the
+ * security chain does no work on it beyond declaring it public, and the expensive part —
+ * a BCrypt verification at strength 12, deliberately ~100ms — happens in the handler,
+ * which is downstream of this filter. A rejected request therefore costs a Redis
+ * {@code INCR}, not a password hash, and the limiter protects the operation rather than
+ * merely counting requests after the cost has been paid.
+ *
+ * <h2>Failure policy</h2>
+ *
+ * <p>When Redis cannot answer, the two kinds of traffic are treated differently, and
+ * deliberately so — see {@link LocalAuthRateLimiter} for the full argument. Authenticated
+ * API traffic is allowed through, because the caller already holds a valid token and an
+ * infrastructure incident should not also be an outage. Authentication endpoints fall back
+ * to a bounded per-instance limiter, because fail-open there means the sign-in limit can be
+ * removed by anyone able to disturb Redis.
  */
 @Component
 @Order(50)
@@ -36,6 +56,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final String API_PATH_PREFIX = "/api/";
 
     private final RedisRateLimiter rateLimiter;
+    private final LocalAuthRateLimiter authFallback;
     private final RateLimitProperties properties;
     private final ObjectMapper objectMapper;
 
@@ -53,11 +74,29 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 : properties.getApiRequestsPerWindow();
         String bucket = (authEndpoint ? "auth:" : "api:") + callerKey(request);
 
-        if (!rateLimiter.tryAcquire(bucket, limit, properties.getWindow())) {
+        if (!permitted(bucket, limit, authEndpoint)) {
             reject(response);
             return;
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Applies the distributed limit, and the failure policy when there isn't one.
+     *
+     * <p>The fallback is consulted only for authentication endpoints and only when Redis
+     * gave no answer — never as a second opinion on a {@code LIMITED} verdict, which would
+     * let a caller who is already over the distributed budget spend a fresh local one.
+     */
+    private boolean permitted(String bucket, int limit, boolean authEndpoint) {
+        RateLimitOutcome outcome = rateLimiter.check(bucket, limit, properties.getWindow());
+        return switch (outcome) {
+            case ALLOWED -> true;
+            case LIMITED -> false;
+            case UNAVAILABLE -> !authEndpoint
+                    || !properties.isAuthFallbackEnabled()
+                    || authFallback.tryAcquire(bucket, limit, properties.getWindow());
+        };
     }
 
     private String callerKey(HttpServletRequest request) {

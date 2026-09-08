@@ -52,6 +52,20 @@ public class SecurityConfig {
             "/swagger-ui/**"
     };
 
+    /**
+     * Whether the OpenAPI document and Swagger UI are reachable at all.
+     *
+     * <p>Defaults to true so a developer checkout keeps working, and is set to false in
+     * {@code application-prod.yml} alongside {@code springdoc.*.enabled}. Both halves are
+     * needed and they answer different questions: springdoc's own flags stop the endpoints
+     * from being registered, and this flag stops the security chain from declaring them
+     * public. Leaving the {@code permitAll} rule in place while springdoc is off would be
+     * harmless today and quietly wrong the moment anything else is mapped under
+     * {@code /v3/api-docs} or {@code /swagger-ui}.
+     */
+    @Value("${juriscore.security.docs.enabled:true}")
+    private boolean docsEnabled;
+
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final RestAuthenticationEntryPoint authenticationEntryPoint;
     private final RestAccessDeniedHandler accessDeniedHandler;
@@ -66,13 +80,21 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(PUBLIC_ENDPOINTS).permitAll()
-                        .requestMatchers(DOCS_ENDPOINTS).permitAll()
-                        .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/**",
-                                "/actuator/info").permitAll()
-                        .requestMatchers("/actuator/**").hasRole("SUPER_ADMIN")
-                        .anyRequest().authenticated())
+                .authorizeHttpRequests(auth -> {
+                    auth.requestMatchers(PUBLIC_ENDPOINTS).permitAll();
+                    if (docsEnabled) {
+                        auth.requestMatchers(DOCS_ENDPOINTS).permitAll();
+                    } else {
+                        // Not merely unmapped: anything still answering under these paths
+                        // in a deployed environment requires a platform administrator.
+                        auth.requestMatchers(DOCS_ENDPOINTS).hasRole("SUPER_ADMIN");
+                    }
+                    auth
+                            .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/health/**",
+                                    "/actuator/info").permitAll()
+                            .requestMatchers("/actuator/**").hasRole("SUPER_ADMIN")
+                            .anyRequest().authenticated();
+                })
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler))
@@ -119,7 +141,23 @@ public class SecurityConfig {
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Request-Id"));
         configuration.setExposedHeaders(List.of("X-Request-Id"));
-        configuration.setAllowCredentials(true);
+        /*
+         * Credentials are NOT allowed, because this API does not use any.
+         *
+         * Authentication is a bearer token that the client reads from memory and puts in
+         * the Authorization header; there is no cookie, no HTTP Basic prompt and no TLS
+         * client certificate for the browser to attach. `allowCredentials(true)` therefore
+         * bought nothing, while instructing browsers to send whatever ambient credentials
+         * a future change might introduce — a cookie added later would start riding along
+         * on cross-origin calls without anyone deciding that it should.
+         *
+         * It also removes a foot-gun: with credentials allowed, a wildcard origin is
+         * illegal, and the temptation under a deployment problem is to widen the origin
+         * list rather than fix it. The Authorization header is unaffected — it is listed
+         * in the allowed headers above and is sent explicitly by the client, not by the
+         * browser's credential machinery.
+         */
+        configuration.setAllowCredentials(false);
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

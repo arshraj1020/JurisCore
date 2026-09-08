@@ -7,7 +7,21 @@ spring:
       hibernate:
         format_sql: false
 
+# The API description is a map of every endpoint, parameter and DTO in the platform.
+# That is exactly what makes it useful locally and exactly why it is not published: it
+# saves an attacker the reconnaissance. Off in two places on purpose — springdoc stops
+# serving the endpoints, and juriscore.security.docs.enabled stops the security chain
+# from treating those paths as public (see SecurityConfig).
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
 juriscore:
+  security:
+    docs:
+      enabled: false
   aws:
     # Empty: use the real AWS endpoints and the ECS task role's credentials.
     endpoint: ""

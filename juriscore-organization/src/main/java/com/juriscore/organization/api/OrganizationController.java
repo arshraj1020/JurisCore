@@ -27,8 +27,26 @@ public class OrganizationController {
 
     private final OrganizationService organizationService;
 
+    /**
+     * The caller's own firm.
+     *
+     * <p>The tenant comes from {@link CurrentUser#requireOrganizationId()} — that is, from
+     * the access token — and there is deliberately no path variable, query parameter or
+     * header that could name a different one. Reading another firm's profile is a separate
+     * endpoint below, and it requires SUPER_ADMIN.
+     *
+     * <p>The {@code @PreAuthorize} is not redundant even though the security chain already
+     * requires authentication for everything unmatched. It states the rule where the
+     * handler is read rather than in a list of path patterns two modules away, and it
+     * narrows the endpoint to firm staff, which is the only audience the product has for
+     * it: a CLIENT is an external party who sees what has been shared with them, not the
+     * firm's registration number and billing address. A SUPER_ADMIN is refused here too,
+     * for a different reason — they belong to no firm, so "the caller's own firm" is not a
+     * question that has an answer, and {@code requireOrganizationId()} would throw.
+     */
     @GetMapping("/current")
-    @Operation(summary = "Profile of the firm the caller belongs to")
+    @PreAuthorize("hasAnyRole('FIRM_ADMIN', 'LAWYER', 'CLERK')")
+    @Operation(summary = "Profile of the firm the caller belongs to (firm staff only)")
     public ApiResponse<OrganizationResponse> current() {
         UUID organizationId = CurrentUser.requireOrganizationId();
         return ApiResponse.ok(OrganizationResponse.from(organizationService.getById(organizationId)));

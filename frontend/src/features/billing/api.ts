@@ -1,7 +1,8 @@
 import { api } from '@/lib/api/client';
 import type {
   BillingProfile, CancelInvoiceRequest, CreateInvoiceRequest, Invoice, IssueInvoiceRequest,
-  PageResponse, Payment, RecordPaymentRequest, UpdateInvoiceRequest,
+  PageResponse, Payment, RecordPaymentRequest, UpdateBillingProfileRequest,
+  UpdateInvoiceRequest,
 } from '@/types/api';
 
 export interface InvoiceListParams {
@@ -27,6 +28,10 @@ export const invoicesApi = {
 
 export const billingProfileApi = {
   current: () => api.get<BillingProfile>('/api/v1/billing/profile'),
-  update: (body: Partial<BillingProfile>) =>
+  /**
+   * A full replacement, not a patch — see `UpdateBillingProfileRequest`. The type is not
+   * `Partial<...>` on purpose: the endpoint nulls every field the body omits.
+   */
+  update: (body: UpdateBillingProfileRequest) =>
     api.patch<BillingProfile>('/api/v1/billing/profile', body),
 };

@@ -199,7 +199,7 @@ class AuthServiceTest {
     void rotatesRefreshToken() {
         User user = activeUser();
         RefreshToken stored = storedToken(user.getId(), Instant.now().plus(Duration.ofDays(7)));
-        when(refreshTokenRepository.findByTokenHash(anyString())).thenReturn(Optional.of(stored));
+        when(refreshTokenRepository.findByTokenHashForUpdate(anyString())).thenReturn(Optional.of(stored));
         when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
 
         var tokens = authService.refresh("whatever-raw-token", AuthService.RequestContext.unknown());
@@ -218,7 +218,7 @@ class AuthServiceTest {
         // What makes this reuse rather than merely a dead token: it was exchanged for a
         // successor, so a second presentation means two parties are holding it.
         alreadyRotated.setReplacedBy(UUID.randomUUID());
-        when(refreshTokenRepository.findByTokenHash(anyString())).thenReturn(Optional.of(alreadyRotated));
+        when(refreshTokenRepository.findByTokenHashForUpdate(anyString())).thenReturn(Optional.of(alreadyRotated));
 
         assertThatThrownBy(() -> authService.refresh("stolen-token", AuthService.RequestContext.unknown()))
                 .isInstanceOfSatisfying(ApiException.class,
@@ -238,7 +238,7 @@ class AuthServiceTest {
         RefreshToken signedOut = storedToken(user.getId(), Instant.now().plus(Duration.ofDays(7)));
         signedOut.revoke();
         // No replacedBy: this is what signing out or revoking every session leaves behind.
-        when(refreshTokenRepository.findByTokenHash(anyString())).thenReturn(Optional.of(signedOut));
+        when(refreshTokenRepository.findByTokenHashForUpdate(anyString())).thenReturn(Optional.of(signedOut));
 
         assertThatThrownBy(() -> authService.refresh("stale-token", AuthService.RequestContext.unknown()))
                 .isInstanceOfSatisfying(ApiException.class,

@@ -514,6 +514,41 @@ export interface BillingProfile {
   version?: number | null;
 }
 
+/**
+ * The body `PATCH /api/v1/billing/profile` expects — a **full replacement**, despite the verb.
+ *
+ * `BillingProfileService.update` assigns every field below unconditionally
+ * (`profile.setCity(trim(request.city()))` and ten more like it), so a field left out of the
+ * JSON arrives as `null` and is written as `null`. Sending `{ invoicePrefix: 'INV' }` does
+ * not patch the prefix; it erases the firm's registered address, billing email and tax
+ * registration on the way past.
+ *
+ * The API method used to take `Partial<BillingProfile>`, which made every one of those
+ * fields optional and let TypeScript wave through exactly that call. Every key is therefore
+ * required here — explicitly `null` to clear a value, never absent — so the compiler refuses
+ * a partial write instead of the user discovering it afterwards.
+ *
+ * The two exceptions are faithful to the server rather than tidy: `defaultCurrency` and
+ * `invoicePrefix` are only assigned when non-blank, so they are non-nullable strings here.
+ */
+export interface UpdateBillingProfileRequest {
+  legalName: string | null;
+  taxRegistration: string | null;
+  billingEmail: string | null;
+  billingPhone: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+  postalCode: string | null;
+  invoiceNotes: string | null;
+  defaultCurrency: string;
+  invoicePrefix: string;
+  /** The optimistic lock; null on the first save, when no profile row exists yet. */
+  version: number | null;
+}
+
 // ----------------------------------------------------------- notifications
 
 export type NotificationType =

@@ -22,8 +22,13 @@ import java.util.List;
  * acceptable for abuse protection; a sliding-log or token-bucket implementation is the
  * upgrade if the limit ever needs to be exact.
  *
- * <p>If Redis is unreachable the limiter fails <em>open</em>. Losing the cache should
- * degrade protection, not take the platform down.
+ * <p>This class does not decide what happens when Redis is unreachable. It reports
+ * {@link RateLimitOutcome#UNAVAILABLE} and lets {@link RateLimitFilter} choose, because
+ * the right answer differs by endpoint: ordinary API traffic is allowed through, while
+ * authentication falls back to {@link LocalAuthRateLimiter}. Returning a bare
+ * {@code true} here — as this used to — buried that policy decision in an exception
+ * handler, where "allow the request" was indistinguishable from "the caller is within
+ * their budget".
  */
 @Component
 @RequiredArgsConstructor
@@ -60,20 +65,23 @@ public class RedisRateLimiter {
     private final StringRedisTemplate redisTemplate;
 
     /**
-     * @return true when the caller is within the limit and the request may proceed
+     * @return whether the caller is within the limit, or that Redis could not answer
      */
-    public boolean tryAcquire(String bucket, int limit, Duration window) {
+    public RateLimitOutcome check(String bucket, int limit, Duration window) {
         String key = KEY_PREFIX + bucket;
         try {
             Long count = redisTemplate.execute(
                     SCRIPT, List.of(key), String.valueOf(window.toMillis()));
             if (count == null) {
-                return true;
+                // The script ran but returned nothing, which should not happen. Treated as
+                // unavailable rather than as a pass: an unreadable answer is not evidence
+                // that the caller is within budget.
+                return RateLimitOutcome.UNAVAILABLE;
             }
-            return count <= limit;
+            return count <= limit ? RateLimitOutcome.ALLOWED : RateLimitOutcome.LIMITED;
         } catch (RuntimeException e) {
-            log.warn("Rate limiter unavailable, allowing request: {}", e.getMessage());
-            return true;
+            log.warn("Rate limiter unavailable: {}", e.getMessage());
+            return RateLimitOutcome.UNAVAILABLE;
         }
     }
 }

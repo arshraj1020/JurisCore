@@ -168,11 +168,17 @@ public class AuthService {
      * token being used alongside the legitimate one. Both are handled the same way —
      * every session for that user is revoked. Losing a session is a minor annoyance;
      * leaving a thief with a valid chain is not.
+     *
+     * <p>The row is read {@code FOR UPDATE}, which is what makes the paragraph above true
+     * when two requests arrive together rather than one after the other. Without the lock
+     * both could read the token as live and both rotate it, producing two valid chains and
+     * no reuse detection at all — see
+     * {@link RefreshTokenRepository#findByTokenHashForUpdate}.
      */
     @Transactional
     public AuthTokens refresh(String presentedToken, RequestContext context) {
         String hash = TokenHasher.hash(presentedToken);
-        RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
+        RefreshToken stored = refreshTokenRepository.findByTokenHashForUpdate(hash)
                 .orElseThrow(() -> new ApiException(ErrorCode.REFRESH_TOKEN_INVALID));
 
         if (stored.isRevoked()) {

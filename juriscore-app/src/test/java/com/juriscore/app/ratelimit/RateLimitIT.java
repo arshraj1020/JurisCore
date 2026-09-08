@@ -42,7 +42,7 @@ class RateLimitIT extends AbstractIntegrationTest {
     @DisplayName("allows exactly the configured number of requests per window")
     void enforcesTheLimit() {
         List<Boolean> results = java.util.stream.IntStream.range(0, 8)
-                .mapToObj(i -> rateLimiter.tryAcquire("auth:ip:198.51.100.7", 5, Duration.ofMinutes(1)))
+                .mapToObj(i -> allowed(rateLimiter, "auth:ip:198.51.100.7", 5, Duration.ofMinutes(1)))
                 .toList();
 
         assertThat(results).containsExactly(true, true, true, true, true, false, false, false);
@@ -52,12 +52,12 @@ class RateLimitIT extends AbstractIntegrationTest {
     @DisplayName("buckets are independent, so one caller cannot exhaust another's budget")
     void bucketsAreIsolated() {
         for (int i = 0; i < 6; i++) {
-            rateLimiter.tryAcquire("auth:ip:198.51.100.7", 5, Duration.ofMinutes(1));
+            allowed(rateLimiter, "auth:ip:198.51.100.7", 5, Duration.ofMinutes(1));
         }
 
-        assertThat(rateLimiter.tryAcquire("auth:ip:198.51.100.7", 5, Duration.ofMinutes(1))).isFalse();
-        assertThat(rateLimiter.tryAcquire("auth:ip:203.0.113.9", 5, Duration.ofMinutes(1))).isTrue();
-        assertThat(rateLimiter.tryAcquire("api:ip:198.51.100.7", 5, Duration.ofMinutes(1))).isTrue();
+        assertThat(allowed(rateLimiter, "auth:ip:198.51.100.7", 5, Duration.ofMinutes(1))).isFalse();
+        assertThat(allowed(rateLimiter, "auth:ip:203.0.113.9", 5, Duration.ofMinutes(1))).isTrue();
+        assertThat(allowed(rateLimiter, "api:ip:198.51.100.7", 5, Duration.ofMinutes(1))).isTrue();
     }
 
     /**
@@ -68,7 +68,7 @@ class RateLimitIT extends AbstractIntegrationTest {
     @Test
     @DisplayName("every counter is created with an expiry attached")
     void counterAlwaysCarriesAnExpiry() {
-        rateLimiter.tryAcquire("auth:ip:198.51.100.7", 5, Duration.ofSeconds(30));
+        allowed(rateLimiter, "auth:ip:198.51.100.7", 5, Duration.ofSeconds(30));
 
         Long ttl = redisTemplate.getExpire("ratelimit:auth:ip:198.51.100.7");
         assertThat(ttl).isNotNull().isGreaterThan(0L);
@@ -82,7 +82,7 @@ class RateLimitIT extends AbstractIntegrationTest {
         redisTemplate.opsForValue().set(key, "500");
         assertThat(redisTemplate.getExpire(key)).isEqualTo(-1L);
 
-        rateLimiter.tryAcquire("auth:ip:198.51.100.7", 5, Duration.ofSeconds(30));
+        allowed(rateLimiter, "auth:ip:198.51.100.7", 5, Duration.ofSeconds(30));
 
         assertThat(redisTemplate.getExpire(key))
                 .as("the stranded counter must be given an expiry so the caller recovers")
@@ -94,13 +94,13 @@ class RateLimitIT extends AbstractIntegrationTest {
     @Timeout(30)
     void windowResets() throws Exception {
         for (int i = 0; i < 6; i++) {
-            rateLimiter.tryAcquire("auth:ip:198.51.100.7", 5, Duration.ofSeconds(1));
+            allowed(rateLimiter, "auth:ip:198.51.100.7", 5, Duration.ofSeconds(1));
         }
-        assertThat(rateLimiter.tryAcquire("auth:ip:198.51.100.7", 5, Duration.ofSeconds(1))).isFalse();
+        assertThat(allowed(rateLimiter, "auth:ip:198.51.100.7", 5, Duration.ofSeconds(1))).isFalse();
 
         Thread.sleep(1400);
 
-        assertThat(rateLimiter.tryAcquire("auth:ip:198.51.100.7", 5, Duration.ofSeconds(1))).isTrue();
+        assertThat(allowed(rateLimiter, "auth:ip:198.51.100.7", 5, Duration.ofSeconds(1))).isTrue();
     }
 
     @Test
@@ -111,7 +111,7 @@ class RateLimitIT extends AbstractIntegrationTest {
         try (var pool = Executors.newFixedThreadPool(16)) {
             List<Callable<Boolean>> tasks = java.util.stream.IntStream.range(0, attempts)
                     .<Callable<Boolean>>mapToObj(i ->
-                            () -> rateLimiter.tryAcquire("api:user:shared", limit, Duration.ofMinutes(1)))
+                            () -> allowed(rateLimiter, "api:user:shared", limit, Duration.ofMinutes(1)))
                     .toList();
 
             long allowed = 0;
@@ -127,10 +127,12 @@ class RateLimitIT extends AbstractIntegrationTest {
     }
 
     @Test
-    @DisplayName("fails open when Redis is unreachable, rather than taking sign-in down with it")
-    void failsOpenWhenRedisIsDown() {
-        // A bucket name is irrelevant here; what matters is that a broken limiter never
-        // becomes a broken platform. Verified by pointing the template at a dead port.
+    @DisplayName("reports UNAVAILABLE when Redis is unreachable, rather than guessing")
+    void reportsUnavailableWhenRedisIsDown() {
+        // This used to assert `isTrue()` — that a dead Redis meant "allow". The verdict has
+        // moved up a level: the limiter now says it does not know, and RateLimitFilter
+        // decides what that means per endpoint. Allowing authenticated API traffic through
+        // is still the policy; silently allowing *sign-in* through was the hole.
         var deadFactory = new org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory(
                 "127.0.0.1", 6390);
         deadFactory.afterPropertiesSet();
@@ -139,7 +141,14 @@ class RateLimitIT extends AbstractIntegrationTest {
 
         RedisRateLimiter offline = new RedisRateLimiter(deadTemplate);
 
-        assertThat(offline.tryAcquire("auth:ip:198.51.100.7", 1, Duration.ofMinutes(1))).isTrue();
+        assertThat(offline.check("auth:ip:198.51.100.7", 1, Duration.ofMinutes(1)))
+                .isEqualTo(RateLimitOutcome.UNAVAILABLE);
         deadFactory.destroy();
+    }
+
+    /** The limiter's verdict, as the old boolean API expressed it. */
+    private static boolean allowed(RedisRateLimiter limiter, String bucket, int limit,
+                                   Duration window) {
+        return limiter.check(bucket, limit, window) == RateLimitOutcome.ALLOWED;
     }
 }
