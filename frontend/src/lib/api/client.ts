@@ -1,4 +1,4 @@
-import type { ApiResponse } from '@/types/api';
+import type { ApiResponse, AuthTokens } from '@/types/api';
 import { ApiError, networkError, toApiError } from './errors';
 import {
   clearTokens, getAccessToken, getRefreshToken, setAccessToken, setRefreshToken,
@@ -70,7 +70,7 @@ function endSession(): void {
 
 // ------------------------------------------------------------ token refresh
 
-let refreshInFlight: Promise<string | null> | null = null;
+let refreshInFlight: Promise<AuthTokens | null> | null = null;
 
 /**
  * Exchanges the refresh token for a new pair, at most once at a time.
@@ -80,8 +80,15 @@ let refreshInFlight: Promise<string | null> | null = null;
  * parallel refreshes would rotate the refresh token six times, and the backend revokes
  * the one it replaces — so five of them would fail and the user would be signed out
  * mid-session. Sharing one promise means one rotation and five waiters.
+ *
+ * The whole `AuthTokens` payload is returned, not just the access token, because the
+ * refresh response also carries the user — and session *restoration* on boot needs that
+ * user. Before this returned it, `AuthProvider` had no way to reuse this function and
+ * called `/api/v1/auth/refresh` itself, which under StrictMode's double-invoked effects
+ * meant two rotations racing over one token: the second lost with a 409 and signed the
+ * winner out. There is exactly one refresh path in this application, and it is here.
  */
-async function refreshAccessToken(): Promise<string | null> {
+export async function refreshSession(): Promise<AuthTokens | null> {
   if (refreshInFlight) return refreshInFlight;
 
   const refreshToken = getRefreshToken();
@@ -95,12 +102,10 @@ async function refreshAccessToken(): Promise<string | null> {
         body: JSON.stringify({ refreshToken }),
       });
       if (!response.ok) return null;
-      const payload = (await response.json()) as ApiResponse<{
-        accessToken: string; refreshToken: string;
-      }>;
+      const payload = (await response.json()) as ApiResponse<AuthTokens>;
       setAccessToken(payload.data.accessToken);
       setRefreshToken(payload.data.refreshToken);
-      return payload.data.accessToken;
+      return payload.data;
     } catch {
       return null;
     } finally {
@@ -111,6 +116,12 @@ async function refreshAccessToken(): Promise<string | null> {
   })();
 
   return refreshInFlight;
+}
+
+/** The access token from a shared refresh, for the 401-replay path. */
+async function refreshAccessToken(): Promise<string | null> {
+  const tokens = await refreshSession();
+  return tokens?.accessToken ?? null;
 }
 
 // ---------------------------------------------------------------- requests

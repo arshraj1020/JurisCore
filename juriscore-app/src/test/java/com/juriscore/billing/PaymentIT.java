@@ -28,7 +28,7 @@ class PaymentIT extends AbstractBillingIT {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(paymentBody("4000.00", "INR")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.amount").value(4000.00))
+                .andExpect(jsonPath("$.data.amount").value("4000.00"))
                 .andExpect(jsonPath("$.data.currency").value("INR"))
                 .andExpect(jsonPath("$.data.method").value("UPI"))
                 .andExpect(jsonPath("$.data.reference").value("UTR 220414512345"))
@@ -36,8 +36,8 @@ class PaymentIT extends AbstractBillingIT {
 
         assertThat(statusOf(invoiceId)).isEqualTo("PARTIALLY_PAID");
         mockMvc.perform(get("/api/v1/invoices/" + invoiceId).header("Authorization", bearer(token)))
-                .andExpect(jsonPath("$.data.amountPaid").value(4000.00))
-                .andExpect(jsonPath("$.data.amountDue").value(7800.00))
+                .andExpect(jsonPath("$.data.amountPaid").value("4000.00"))
+                .andExpect(jsonPath("$.data.amountDue").value("7800.00"))
                 .andExpect(jsonPath("$.data.paidAt").doesNotExist());
 
         assertThat(events.require(PaymentRecordedEvent.class).getAmountDue())
@@ -65,7 +65,7 @@ class PaymentIT extends AbstractBillingIT {
         assertThat(paidOn(invoiceId)).isEqualByComparingTo("11800.00");
         assertThat(paymentCount(invoiceId)).isEqualTo(3);
         mockMvc.perform(get("/api/v1/invoices/" + invoiceId).header("Authorization", bearer(token)))
-                .andExpect(jsonPath("$.data.amountDue").value(0.00))
+                .andExpect(jsonPath("$.data.amountDue").value("0.00"))
                 .andExpect(jsonPath("$.data.paidAt").isNotEmpty());
 
         assertThat(events.require(InvoicePaidEvent.class).getTotalAmount())

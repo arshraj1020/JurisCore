@@ -7,17 +7,30 @@ import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
+import io.swagger.v3.oas.models.media.StringSchema;
 import io.swagger.v3.oas.models.servers.Server;
+import org.springdoc.core.utils.SpringDocUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Configuration
 public class OpenApiConfig {
 
     private static final String BEARER_SCHEME = "bearerAuth";
+
+    static {
+        // JacksonConfig serialises every BigDecimal as a JSON string. Without this the
+        // published schema would keep describing them as `number`, and a generated client
+        // built from it would parse money back into a float — the exact loss the string
+        // contract exists to prevent. The document must say what the API actually sends.
+        SpringDocUtils.getConfig().replaceWithSchema(BigDecimal.class,
+                new StringSchema().example("11800.00")
+                        .description("An exact decimal, carried as a string."));
+    }
 
     @Value("${juriscore.api.public-url:http://localhost:8080}")
     private String publicUrl;

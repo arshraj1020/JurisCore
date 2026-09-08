@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from '@/lib/auth/AuthContext';
 import { ToastProvider } from '@/components/ui/Toast';
 import { AppShell } from '@/app/AppShell';
+import { ErrorBoundary } from '@/app/ErrorBoundary';
 import {
   FullPageSpinner, ProtectedRoute, RequireFirmContext, RequirePermission,
 } from '@/app/ProtectedRoute';
@@ -109,18 +110,24 @@ export function AppRoutes() {
 
 export function App() {
   return (
-    <QueryClientProvider client={createQueryClient()}>
-      <BrowserRouter>
-        <AuthProvider>
-          <ToastProvider>
-            <a href="#main"
-              className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:shadow">
-              Skip to content
-            </a>
-            <AppRoutes />
-          </ToastProvider>
-        </AuthProvider>
-      </BrowserRouter>
-    </QueryClientProvider>
+    // Outermost on purpose. A rendering exception anywhere below — a route, a provider's
+    // children, a lazily loaded page — would otherwise unmount the whole application and
+    // leave a blank document. Above the router, so the boundary survives the failure and
+    // can offer a way out of it.
+    <ErrorBoundary>
+      <QueryClientProvider client={createQueryClient()}>
+        <BrowserRouter>
+          <AuthProvider>
+            <ToastProvider>
+              <a href="#main"
+                className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:shadow">
+                Skip to content
+              </a>
+              <AppRoutes />
+            </ToastProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

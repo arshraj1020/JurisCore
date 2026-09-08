@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { api, onSessionEnded } from '@/lib/api/client';
+import { api, onSessionEnded, refreshSession } from '@/lib/api/client';
 import {
   clearTokens, getRefreshToken, setAccessToken, setRefreshToken,
 } from '@/lib/auth/tokenStorage';
@@ -35,6 +35,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * refresh token, or the backend has revoked it, this settles quickly into "signed out"
    * — which is why `initialising` exists: routing before this resolves would bounce a
    * signed-in user to the login page on every refresh.
+   *
+   * Two details here are load-bearing, and both were once wrong.
+   *
+   * `refreshSession()` rather than a direct POST to `/api/v1/auth/refresh`. Refresh
+   * tokens rotate and the backend revokes the one it replaces — correctly, since a
+   * replayed refresh token is how a stolen session is detected. StrictMode runs this
+   * effect twice in development, so a direct call meant two rotations racing the same
+   * token: one won, the other got a 409, and the user was signed out on every reload.
+   * `refreshSession()` is the application's single-flight refresh; the second run joins
+   * the first's promise, so there is one rotation and two readers of one result. The fix
+   * belongs here, not in StrictMode and not in the backend's rotation.
+   *
+   * And the failure path is guarded by `cancelled`. An unmounted, superseded run must
+   * never call `clearTokens()`: the tokens it would be clearing are the *successful*
+   * run's. A cancelled effect cleans up after itself and touches nothing else.
    */
   useEffect(() => {
     let cancelled = false;
@@ -43,16 +58,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setInitialising(false);
         return;
       }
+      let tokens: AuthTokens | null = null;
       try {
-        const tokens = await api.anonymousPost<AuthTokens>('/api/v1/auth/refresh', {
-          refreshToken: getRefreshToken(),
-        });
-        if (!cancelled) adopt(tokens);
+        tokens = await refreshSession();
       } catch {
-        clearTokens();
-      } finally {
-        if (!cancelled) setInitialising(false);
+        tokens = null;
       }
+      if (cancelled) return;
+      if (tokens) adopt(tokens);
+      // Only a live run may end the session — and only when the refresh genuinely
+      // failed, which `refreshSession` reports as null rather than by throwing.
+      else clearTokens();
+      setInitialising(false);
     })();
     return () => { cancelled = true; };
   }, [adopt]);

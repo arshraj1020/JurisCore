@@ -177,3 +177,66 @@ describe('InvoiceDetailPage — recording a payment', () => {
     expect(body).toMatchObject({ amount: '11800.00', currency: 'INR', method: 'BANK_TRANSFER' });
   });
 });
+
+describe('InvoiceDetailPage — the backend decimal contract', () => {
+  /**
+   * The regression this file exists for.
+   *
+   * The backend used to serialise `BigDecimal` as a JSON *number*, so `line.quantity`
+   * arrived as `2.5` where every type in `@/types/api` promises a string. `formatQuantity`
+   * called `.replace` on it, that threw `quantity.replace is not a function` during
+   * render, and — with no error boundary above it — React unmounted the whole application
+   * and left a blank page. The contract is fixed at the JSON boundary now; this fixture is
+   * shaped exactly like the corrected response, trailing zeros and all, and asserts the
+   * page renders it rather than merely not exploding.
+   */
+  const backendShaped = invoice({
+    subtotal: '10000.00',
+    taxAmount: '1800.00',
+    discountAmount: '0.00',
+    totalAmount: '11800.00',
+    amountPaid: '0.00',
+    amountDue: '11800.00',
+    lineItems: [{
+      id: 'line-1',
+      description: 'Drafting written statement',
+      quantity: '2.500',
+      unitPrice: '4000.00',
+      amount: '10000.00',
+      taxRate: '18.000',
+      taxAmount: '1800.00',
+      sortOrder: 0,
+    }],
+  });
+
+  it('renders string decimals from the real response shape', async () => {
+    mount('FIRM_ADMIN', backendShaped);
+
+    await screen.findByRole('heading', { name: 'INV-2026-0007' });
+
+    // Trailing zeros trimmed for display, exactness preserved on the wire.
+    expect(screen.getByText('2.5')).toBeInTheDocument();
+    expect(screen.getByText('18%')).toBeInTheDocument();
+    expect(screen.getByText('₹4,000.00')).toBeInTheDocument();
+    expect(screen.getAllByText('₹11,800.00').length).toBeGreaterThan(0);
+  });
+
+  it('does not blank the page on a decimal-heavy invoice', async () => {
+    // Several lines with different scales — the shape that used to accumulate the crash.
+    mount('FIRM_ADMIN', invoice({
+      ...backendShaped,
+      lineItems: [
+        { ...backendShaped.lineItems![0]! },
+        {
+          id: 'line-2', description: 'Conference', quantity: '1.000', unitPrice: '0.50',
+          amount: '0.50', taxRate: '0.000', taxAmount: '0.00', sortOrder: 1,
+        },
+      ],
+    }));
+
+    await screen.findByRole('heading', { name: 'INV-2026-0007' });
+    expect(screen.getByText('Conference')).toBeInTheDocument();
+    // Unit price and line amount are both ₹0.50 on that line, hence getAll.
+    expect(screen.getAllByText('₹0.50').length).toBeGreaterThan(0);
+  });
+});

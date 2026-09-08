@@ -36,15 +36,15 @@ class InvoiceLifecycleIT extends AbstractBillingIT {
                 .andExpect(jsonPath("$.data.currency").value("INR"))
                 .andExpect(jsonPath("$.data.clientId").value(ledger.clientId()))
                 .andExpect(jsonPath("$.data.caseId").value(ledger.caseId()))
-                .andExpect(jsonPath("$.data.subtotal").value(10000.00))
-                .andExpect(jsonPath("$.data.taxAmount").value(1800.00))
-                .andExpect(jsonPath("$.data.discountAmount").value(0.00))
-                .andExpect(jsonPath("$.data.totalAmount").value(11800.00))
-                .andExpect(jsonPath("$.data.amountPaid").value(0.00))
-                .andExpect(jsonPath("$.data.amountDue").value(11800.00))
+                .andExpect(jsonPath("$.data.subtotal").value("10000.00"))
+                .andExpect(jsonPath("$.data.taxAmount").value("1800.00"))
+                .andExpect(jsonPath("$.data.discountAmount").value("0.00"))
+                .andExpect(jsonPath("$.data.totalAmount").value("11800.00"))
+                .andExpect(jsonPath("$.data.amountPaid").value("0.00"))
+                .andExpect(jsonPath("$.data.amountDue").value("11800.00"))
                 .andExpect(jsonPath("$.data.paidAt").doesNotExist())
-                .andExpect(jsonPath("$.data.lineItems[0].amount").value(10000.00))
-                .andExpect(jsonPath("$.data.lineItems[0].taxAmount").value(1800.00))
+                .andExpect(jsonPath("$.data.lineItems[0].amount").value("10000.00"))
+                .andExpect(jsonPath("$.data.lineItems[0].taxAmount").value("1800.00"))
                 .andExpect(jsonPath("$.data.lineItems[0].sortOrder").value(0))
                 .andReturn();
 
@@ -92,7 +92,7 @@ class InvoiceLifecycleIT extends AbstractBillingIT {
                                 """.formatted(ledger.clientId(), java.util.UUID.randomUUID())))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.status").value("DRAFT"))
-                .andExpect(jsonPath("$.data.totalAmount").value(500.00))
+                .andExpect(jsonPath("$.data.totalAmount").value("500.00"))
                 .andReturn();
 
         String invoiceId = json(result).path("data").path("id").asText();
@@ -120,10 +120,10 @@ class InvoiceLifecycleIT extends AbstractBillingIT {
                                     "unitPrice":250.00,"taxRate":0.000}]}
                                 """.formatted(versionOf(invoiceId))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.subtotal").value(15250.00))
-                .andExpect(jsonPath("$.data.taxAmount").value(2700.00))
-                .andExpect(jsonPath("$.data.discountAmount").value(800.00))
-                .andExpect(jsonPath("$.data.totalAmount").value(17150.00))
+                .andExpect(jsonPath("$.data.subtotal").value("15250.00"))
+                .andExpect(jsonPath("$.data.taxAmount").value("2700.00"))
+                .andExpect(jsonPath("$.data.discountAmount").value("800.00"))
+                .andExpect(jsonPath("$.data.totalAmount").value("17150.00"))
                 .andExpect(jsonPath("$.data.lineItems.length()").value(2))
                 .andExpect(jsonPath("$.data.notes").value("Revised"));
     }
@@ -308,15 +308,15 @@ class InvoiceLifecycleIT extends AbstractBillingIT {
                 // A page carries the balance but not the lines. Absent rather than empty:
                 // an invoice always has at least one line, so an omitted field can only
                 // mean "not included in a list view".
-                .andExpect(jsonPath("$.data.items[0].totalAmount").value(11800.00))
-                .andExpect(jsonPath("$.data.items[0].amountDue").value(11800.00))
+                .andExpect(jsonPath("$.data.items[0].totalAmount").value("11800.00"))
+                .andExpect(jsonPath("$.data.items[0].amountDue").value("11800.00"))
                 .andExpect(jsonPath("$.data.items[0].lineItems").doesNotExist());
 
         // Fetching one invoice does return them.
         mockMvc.perform(get("/api/v1/invoices/" + second).header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.lineItems.length()").value(1))
-                .andExpect(jsonPath("$.data.lineItems[0].amount").value(10000.00));
+                .andExpect(jsonPath("$.data.lineItems[0].amount").value("10000.00"));
 
         mockMvc.perform(get("/api/v1/invoices").param("status", "DRAFT")
                         .header("Authorization", bearer(token)))

@@ -86,7 +86,7 @@ class InvoiceValidationIT extends AbstractBillingIT {
                                 [{"description":"Waived","quantity":1.000,"unitPrice":1000.00,"taxRate":0.000}]
                                 """, "\"discountAmount\":1000.00")))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.totalAmount").value(0.00));
+                .andExpect(jsonPath("$.data.totalAmount").value("0.00"));
     }
 
     @Test
@@ -102,8 +102,8 @@ class InvoiceValidationIT extends AbstractBillingIT {
                                 [{"description":"Stamp","quantity":1.000,"unitPrice":0.01,"taxRate":0.000}]
                                 """, null)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.subtotal").value(0.01))
-                .andExpect(jsonPath("$.data.totalAmount").value(0.01));
+                .andExpect(jsonPath("$.data.subtotal").value("0.01"))
+                .andExpect(jsonPath("$.data.totalAmount").value("0.01"));
     }
 
     @Test
@@ -120,9 +120,9 @@ class InvoiceValidationIT extends AbstractBillingIT {
                                  {"description":"Disbursements","quantity":3.000,"unitPrice":0.01,"taxRate":0.000}]
                                 """, null)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.subtotal").value(10000000.02))
-                .andExpect(jsonPath("$.data.taxAmount").value(1800000.00))
-                .andExpect(jsonPath("$.data.totalAmount").value(11800000.02))
+                .andExpect(jsonPath("$.data.subtotal").value("10000000.02"))
+                .andExpect(jsonPath("$.data.taxAmount").value("1800000.00"))
+                .andExpect(jsonPath("$.data.totalAmount").value("11800000.02"))
                 .andReturn()).path("data").path("id").asText();
 
         assertThat(totalOf(invoiceId))
@@ -148,13 +148,13 @@ class InvoiceValidationIT extends AbstractBillingIT {
                                  {"description":"C","quantity":1.000,"unitPrice":1.05,"taxRate":18.000}]
                                 """, null)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data.subtotal").value(3.15))
+                .andExpect(jsonPath("$.data.subtotal").value("3.15"))
                 // 1.05 × 18% = 0.189 -> 0.19 per line, so 0.57. Taxing 3.15 in one go
                 // gives 0.567 -> 0.57 as well here; the per-line figures are what each
                 // line prints, and each is 0.19.
-                .andExpect(jsonPath("$.data.taxAmount").value(0.57))
-                .andExpect(jsonPath("$.data.lineItems[0].taxAmount").value(0.19))
-                .andExpect(jsonPath("$.data.totalAmount").value(3.72));
+                .andExpect(jsonPath("$.data.taxAmount").value("0.57"))
+                .andExpect(jsonPath("$.data.lineItems[0].taxAmount").value("0.19"))
+                .andExpect(jsonPath("$.data.totalAmount").value("3.72"));
     }
 
     // ------------------------------------------------------- client and matter checks
