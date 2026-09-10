@@ -34,3 +34,14 @@ application-local-override.yml
 node_modules/
 frontend/dist/
 *.tsbuildinfo
+
+# Archives and scratch output. Thirty megabytes of build tarballs were committed once
+# because nothing here excluded them; *.jar was ignored but a tar full of jars was not.
+*.tgz
+*.tar
+*.tar.gz
+*.zip
+# The JVM drops these beside a module when a debugger or agent attaches during tests.
+.attach_pid*
+# Assistant/scratch output folders. Anything worth keeping belongs in docs/.
+Claude outputs/
