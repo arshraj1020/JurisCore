@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api, onSessionEnded, refreshSession } from '@/lib/api/client';
 import {
   clearTokens, getRefreshToken, setAccessToken, setRefreshToken,
@@ -21,6 +22,39 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
   const [initialising, setInitialising] = useState(true);
+  const queryClient = useQueryClient();
+
+  /**
+   * Forgets everything the previous session fetched.
+   *
+   * <p>Clearing tokens ends a session's *authority*; it does nothing about the data that
+   * session already pulled into memory. The `QueryClient` is created once, above this
+   * provider and above the router, so it survives sign-out: nothing unmounts it, and its
+   * entries live for `gcTime` (five minutes by default) regardless of who is signed in.
+   *
+   * <p>That is a confidentiality bug in a product where two people share a machine. A firm
+   * administrator signs out after looking at matters, invoices, the audit trail and the
+   * member list; a clerk signs in on the same tab a minute later; every one of those
+   * queries finds a cached entry that is still inside the 30-second `staleTime`, so
+   * TanStack Query serves it from memory without so much as a background refetch. The
+   * route guards hid the *pages* from the clerk — they cannot hide a cache entry that has
+   * already been handed to a component. The backend was never consulted, so none of its
+   * authorization applies.
+   *
+   * <p>So the cache is emptied at each of the three real session boundaries: signing out,
+   * being signed out by the server, and signing in as somebody new.
+   *
+   * <p>Note where it is <em>not</em> called: {@code adopt} itself, which also runs during
+   * boot session-restore. At that point the cache cannot hold a previous session's data —
+   * the tab has just loaded — so clearing buys nothing, and it actively harms, because any
+   * query that started before the restore resolved is discarded mid-flight and its
+   * component is left with no data and no refetch. `ProtectedRoute` waits for
+   * `initialising` so the workspace does not do that, but nothing rendered outside that
+   * gate is protected, and a component that fetches on mount would simply come up empty.
+   */
+  const forgetSessionData = useCallback(() => {
+    queryClient.clear();
+  }, [queryClient]);
 
   const adopt = useCallback((tokens: AuthTokens) => {
     setAccessToken(tokens.accessToken);
@@ -75,19 +109,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [adopt]);
 
   /** The HTTP layer ended the session (a 401 no refresh could rescue). Follow it. */
-  useEffect(() => onSessionEnded(() => setUserState(null)), []);
+  useEffect(() => onSessionEnded(() => {
+    setUserState(null);
+    forgetSessionData();
+  }), [forgetSessionData]);
 
   const login = useCallback(async (credentials: LoginRequest) => {
     const tokens = await api.anonymousPost<AuthTokens>('/api/v1/auth/login', credentials);
+    // Before adopting, not after: whoever signs in next must not inherit a single entry
+    // from whoever was here before, and this is the boundary that catches any path which
+    // ended the previous session without going through logout or onSessionEnded.
+    forgetSessionData();
     adopt(tokens);
     return tokens.user;
-  }, [adopt]);
+  }, [adopt, forgetSessionData]);
 
   const register = useCallback(async (details: RegisterRequest) => {
     const tokens = await api.anonymousPost<AuthTokens>('/api/v1/auth/register', details);
+    forgetSessionData();
     adopt(tokens);
     return tokens.user;
-  }, [adopt]);
+  }, [adopt, forgetSessionData]);
 
   const logout = useCallback(async () => {
     const refreshToken = getRefreshToken();
@@ -101,8 +143,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       clearTokens();
       setUserState(null);
+      forgetSessionData();
     }
-  }, []);
+  }, [forgetSessionData]);
 
   const value = useMemo<AuthState>(
     () => ({ user, initialising, login, register, logout, setUser: setUserState }),

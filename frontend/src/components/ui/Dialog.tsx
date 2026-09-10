@@ -28,12 +28,22 @@ export function Dialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const id = useId();
+  /** True while the effect below is closing the dialog because `open` went false. */
+  const closingFromProp = useRef(false);
 
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
     if (open && !dialog.open) dialog.showModal();
-    if (!open && dialog.open) dialog.close();
+    if (!open && dialog.open) {
+      // `close()` fires the native `close` event, which is wired to `onClose` below. Since
+      // this branch only runs because the parent *already* set `open` to false, letting
+      // that through would call `onClose` a second time for a close the parent requested.
+      // Harmless when the handler is a bare `setOpen(false)`; not harmless where it
+      // invalidates queries or resets a form, which several callers do — those ran twice.
+      closingFromProp.current = true;
+      dialog.close();
+    }
   }, [open]);
 
   return (
@@ -42,7 +52,15 @@ export function Dialog({
       aria-labelledby={`${id}-title`}
       aria-describedby={description ? `${id}-description` : undefined}
       onCancel={(event) => { event.preventDefault(); onClose(); }}
-      onClose={onClose}
+      onClose={() => {
+        // Escape and the backdrop reach us here and must notify the parent. A close the
+        // parent itself asked for must not.
+        if (closingFromProp.current) {
+          closingFromProp.current = false;
+          return;
+        }
+        onClose();
+      }}
       className={cn(
         'w-[calc(100vw-1.5rem)] rounded-lg border border-ink-200 p-0 text-ink-900 shadow-pop',
         'backdrop:bg-ink-950/50 backdrop:backdrop-blur-[1px]',

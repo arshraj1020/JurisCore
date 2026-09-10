@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -41,6 +41,7 @@ type PasswordValues = z.infer<typeof passwordSchema>;
 export function ProfilePage() {
   const { user, setUser } = useAuth();
   const toast = useToast();
+  const queryClient = useQueryClient();
 
   const organization = useQuery({
     queryKey: keys.organization,
@@ -68,8 +69,12 @@ export function ProfilePage() {
       lastName: values.lastName.trim(),
       phone: values.phone.trim() || undefined,
     }),
-    onSuccess: (updated) => {
+    onSuccess: async (updated) => {
       setUser(updated);
+      // The member list renders these same names, and it is the one mutation in the app
+      // that was not invalidating what it changed: a firm admin who renamed themselves saw
+      // the old name on /members until the cache aged out.
+      await queryClient.invalidateQueries({ queryKey: keys.users.all });
       toast.success('Profile updated');
     },
   });
