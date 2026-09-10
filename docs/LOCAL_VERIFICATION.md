@@ -1,6 +1,7 @@
-# JurisCore Phase 1 — local verification
+# JurisCore — local verification
 
-The procedure that takes Phase 1 from "statically verified" to "proven on a real machine".
+The procedure that takes the build from "statically verified" to "proven on a real
+machine".
 Every command is run from `~/Desktop/JurisCore` and assumes **nothing is already running**.
 
 Roughly 10–15 minutes end to end, most of it the first Maven dependency download.
@@ -116,21 +117,22 @@ mvn -B clean verify
 ```
 
 This runs, in order: compile → unit tests (Surefire) → integration tests (Failsafe) →
-package. **Expect 97 test cases across 9 classes, 0 failures.**
+package. **Expect 617 unit tests plus the Failsafe integration suites, 0 failures, 0 errors, 0 skipped.**
 
 The integration tests start **their own** PostgreSQL and Redis through Testcontainers on
 random host ports. They do not use the Compose containers from §3 and cannot collide with
 them — the Compose stack is for running the application, Testcontainers is for the tests.
 Docker must be running for both.
 
-What the suite holds down:
+What the suite holds down — a representative selection from the identity and platform
+modules, not the full list:
 
 | Class | Kind | Covers |
 |---|---|---|
 | `StrongPasswordValidatorTest` | unit | password policy, including the blocklist |
 | `JwtServiceTest` | unit | token round-trip, signature/issuer/expiry rejection, short-key refusal |
 | `AuthServiceTest` | unit | lockout, account-enumeration resistance, rotation, reuse |
-| `TenantGuardTest` | unit | the tenant guard's contract, ahead of Phase 2 |
+| `TenantGuardTest` | unit | the tenant guard's contract |
 | `DockerApiVersionTest` | unit | Docker API version negotiation: parsing, HTTP decoding, the clamp rule |
 | `AuthFlowIT` | integration | registration, sign-in, rotation, invitation, error envelope |
 | `SecurityGuaranteesIT` | integration | token revocation, single-use reset links, RBAC, tenant isolation on writes |

@@ -1,7 +1,13 @@
 # JurisCore — architecture notes
 
-Decisions, and the reasoning behind them, for the Phase 1 foundation. Where this
+Decisions, and the reasoning behind them, for the system as it stands. Where this
 document departs from the PRD it says so and why.
+
+"Phase N" throughout refers to the build stage in which a decision was taken — Phase 1
+the identity and platform foundation, 2-3 case management, 4 documents, 5 billing,
+notifications and audit, 6 the web client. All six are implemented; the phase labels are
+kept because the reasoning is easier to follow in the order the decisions were made. For
+what the system does today, see the [README](../README.md).
 
 ## 1. Modular monolith before microservices
 

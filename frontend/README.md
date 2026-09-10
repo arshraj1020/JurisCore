@@ -129,7 +129,7 @@ screen. That keyboard model is why `Tabs` is a component rather than a row of bu
 
 ## Tests
 
-88 tests across fourteen files, run with `npm test`. They cover the things that are actually
+206 tests across 25 files, run with `npm test`. They cover the things that are actually
 easy to get wrong: exact decimal arithmetic and HALF_UP rounding, the refresh single-flight
 under a burst of parallel 401s, the presigned upload contract including the absent
 Authorization header and the expired-link retry, lifecycle and role gating on the invoice

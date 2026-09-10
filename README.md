@@ -1,138 +1,180 @@
 # JurisCore
 
-Enterprise legal case management and court workflow platform for law firms, advocates and
-their clients.
+Legal case management and court workflow for law firms: matters, hearings, deadlines,
+documents and billing, in one multi-tenant application.
 
-**Status: Phase 6 — the API is complete through billing, notifications and audit, and a
-React/TypeScript web client now sits on top of it.** See [Roadmap](#roadmap) for what each
-phase covers and, just as importantly, what it does not.
+Each firm is a tenant with a hard boundary around its data. Every request is scoped to the
+firm in the caller's token — no endpoint accepts a tenant identifier from the client — and a
+lookup that crosses that boundary answers `404`, not `403`, so nothing leaks the existence
+of another firm's records.
+
+![The firm dashboard](docs/screenshots/dashboard.png)
 
 ---
 
-## What is here
+## Features
 
-| Capability | State |
+Everything listed here is implemented and covered by tests. Nothing is aspirational.
+
+**Authentication & identity**
+Firm self-registration; sign-in with short-lived JWT access tokens and rotating refresh
+tokens; refresh-token reuse detection that revokes the whole session family; logout and
+global revocation; password reset; user invitation and activation; account lockout after
+repeated failures.
+
+**Organizations & access control**
+One organization per firm, and the tenant boundary itself. Five roles — `SUPER_ADMIN`,
+`FIRM_ADMIN`, `LAWYER`, `CLERK`, `CLIENT` — enforced with `@PreAuthorize` next to each
+handler, with the frontend's permission map mirroring those rules so no button is offered
+that the server would refuse.
+
+**Clients & lawyers**
+Client records with contact and address details; lawyer assignment to matters; a
+lead-lawyer invariant (a staffed matter has exactly one lead) enforced in the service and
+by a partial unique index.
+
+**Matters (cases)**
+Matters with server-assigned case numbers (`MAT-YYYY-NNNN`, per firm, per year), status
+lifecycle, description, client linkage, and an append-only timeline of everything that
+happened to them.
+
+**Hearings & courts**
+Court registry; hearings scheduled against a court and a matter, with type, duration, judge,
+courtroom and purpose; a status lifecycle the UI mirrors exactly (an adjourned hearing is
+relisted or cancelled — it cannot jump to completed).
+
+**Tasks & deadlines**
+Tasks with priority, assignee and due date; deadlines with type and source; reminders
+against either, dispatched by a background sweep that is safe to run on several instances at
+once.
+
+**Documents**
+Upload straight from the browser to object storage over a presigned `PUT`, so file bytes
+never pass through the application. Register → upload → complete, with storage as the
+authority on the final size; a content-type allowlist, size ceiling and filename rules
+enforced server-side and mirrored in the browser; soft delete with object cleanup after
+commit.
+
+**Billing & invoices**
+Draft invoices with line items, tax and discount; server-authoritative totals (the browser
+shows an estimate and says so); per-firm, per-year invoice numbering that is safe under
+concurrency; issue and cancel transitions; recorded payments with overpayment and
+currency-mismatch refusal; an hourly sweep that marks issued invoices overdue.
+
+**Notifications**
+In-app notifications for invoice, payment and case events, with per-user category
+preferences and an unread count.
+
+**Audit**
+An append-only audit trail of who did what, queryable by firm administrators, with
+credential-shaped values redacted before they are written.
+
+**Security**
+Detailed under [Security](#security).
+
+---
+
+## Architecture
+
+A **modular monolith**: one deployable unit built from ten Maven modules that keep the
+boundaries a service split would need — separate packages, separate database schemas, no
+module reaching into another's repositories, and communication through domain events rather
+than shared tables. Moving a module out later is a packaging change rather than a rewrite.
+The reasoning is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+| Module | Responsibility |
 |---|---|
-| Multi-tenant data model with a hard tenant boundary | Done |
-| Firm self-registration (organization + first administrator) | Done |
-| Sign-in, JWT access tokens, rotating refresh tokens | Done |
-| Password reset, invitation and activation flow | Done |
-| Five-role RBAC (`SUPER_ADMIN`, `FIRM_ADMIN`, `LAWYER`, `CLERK`, `CLIENT`) | Done |
-| Account lockout, per-caller rate limiting, request correlation ids | Done |
-| Uniform response envelope and error catalogue | Done |
-| Flyway migrations, schema-per-module | Done |
-| Docker Compose stack: PostgreSQL, Redis, LocalStack (S3 + SQS) | Done |
-| Domain events with commit-ordered delivery | Done (in-process; SQS not implemented) |
-| OpenAPI / Swagger UI | Done |
-| Unit tests and Testcontainers integration tests | Done |
-| GitHub Actions CI with image build and vulnerability scan | Done |
-| Clients, cases, hearings, tasks, documents | Done (Phases 2–4) |
-| Invoices, line items, recorded payments, overdue sweep | Done (Phase 5) |
-| In-app notifications and per-user category preferences | Done (Phase 5) |
-| Append-only audit trail with a firm-admin query API | Done (Phase 5) |
-| React/TypeScript web client for the whole API | Done (Phase 6) |
+| `juriscore-common` | Shared kernel: response envelope, error catalogue, base entities, tenant context and guard, domain-event contracts |
+| `juriscore-organization` | Law firms — the tenant boundary itself |
+| `juriscore-identity` | Users, authentication, JWT, refresh tokens, RBAC, sessions |
+| `juriscore-casework` | Clients, matters, lawyer assignments, matter timeline |
+| `juriscore-case-management` | Courts, hearings, tasks, deadlines, reminders |
+| `juriscore-documents` | Document metadata, upload policy, presigned storage access |
+| `juriscore-billing` | Billing profile, invoices, line items, payments, numbering |
+| `juriscore-notifications` | In-app notifications and per-user preferences |
+| `juriscore-audit` | Append-only audit trail and its query API |
+| `juriscore-app` | The deployable: configuration, migrations, filters, schedulers, composition |
 
-## Verification status
+Each domain module owns a PostgreSQL schema (`organization`, `identity`, `casework`,
+`case_management`, `documents`, `billing`, `notifications`, `audit`). Cross-module
+references are plain UUID columns rather than foreign keys, which is what keeps the
+boundaries real.
 
-Phase 1 has been verified as far as this environment allows, and it is worth being precise
-about where that line falls.
+---
 
-**Executed and passing:** the Flyway migration against a clean PostgreSQL 16, three times
-on three fresh databases (schemas, column types, foreign keys with `ON DELETE CASCADE`,
-indexes, unique and check constraints, all asserted behaviourally); every entity mapping
-cross-checked against the live DDL, which is what `ddl-auto: validate` does at startup; the
-case-insensitive email index, including a measured 5.3 ms sequential scan versus 0.08 ms
-indexed on 20k users; the rate-limiter's Lua script extracted from the committed source and
-run against a real Redis — limit, atomicity under 200 concurrent callers, and recovery of a
-stranded counter; the LocalStack bootstrap against a real AWS API emulator, with DLQ redrive
-proven by pushing a poison message through it; `REQUIRES_NEW` transaction semantics
-demonstrated directly on PostgreSQL, with a counter-proof that a single transaction would
-undo the revocation; the smoke test validated against a stub — 38/38 on correct behaviour,
-and it correctly fails when a cross-tenant 403 or an account-enumeration oracle is injected;
-`docker compose config`, Dockerfile instruction parsing, and the CI workflow's structure.
+## Tech stack
 
-**Not executed here:** `mvn verify`, application startup, and the Docker image build.
-Maven Central and the Docker registry are both blocked by this environment's network
-allowlist, so no dependency can be resolved and no base image pulled. In place of a
-compiler the tree is checked with a Java 21 parser (83/83 files parse) and a
-cross-reference pass over enum constants, Lombok builder properties, constructor arity,
-static-call arity, Spring Data derived-query property names and JPQL paths — zero
-unresolved references, zero unused imports. That is a good deal stronger than a read-through
-and still not a compiler.
+**Backend** — Java 21, Spring Boot 3.3.5 (Web, Data JPA, Security, Validation), PostgreSQL
+16, Redis 7, Flyway, jjwt, AWS SDK v2 (S3), springdoc-openapi 2.6, Lombok.
 
-**Phase 6 (web client):** `npm run verify` — typecheck, ESLint, 65 tests and a production
-build — was executed on the developer's machine and passes with zero errors. The client has
-**not** been exercised against a running backend end to end; every test runs against MSW
-handlers built from the API's real response shapes, which pins the contract as it is
-written down but cannot catch a place where the written contract and the running service
-disagree. Pointing the dev server at a local backend is the check that would close that gap.
+**Frontend** — React 18.3, TypeScript 5.6, Vite 5.4, TanStack Query 5, React Router 6,
+React Hook Form 7 with Zod 3, Tailwind CSS 3.
 
-**[docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md) is the procedure that closes the
-gap** — prerequisites through teardown, ending in one paste-able block.
+**Testing** — JUnit 5, AssertJ, Mockito, Spring Boot Test, Testcontainers 1.21 (real
+PostgreSQL and Redis), Vitest 2 with React Testing Library and MSW.
 
-## Architecture in one paragraph
+**Infrastructure** — Docker and Docker Compose, LocalStack for S3 locally, GitHub Actions.
 
-JurisCore is a **modular monolith**, not a set of microservices — yet. One deployable
-unit contains several modules that keep the boundaries a service split would need:
-separate packages, separate database schemas, no module reaching into another's
-repositories, and communication through domain events rather than shared tables. That
-buys the design discipline of microservices without paying, on day one, for distributed
-transactions, cross-service debugging and eight deployment pipelines protecting roughly
-zero users. When a module earns its own scaling profile — documents will, first — moving
-it out is a packaging change rather than a rewrite. The full reasoning is in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+---
+
+## Project structure
 
 ```
-juriscore/
-├── juriscore-common/        Shared kernel: API envelope, error catalogue, base
-│                            entities, tenant context, domain event contracts
-├── juriscore-organization/  Law firms — the tenant boundary itself
-├── juriscore-identity/      Users, authentication, JWT, RBAC, sessions
-├── juriscore-app/           The deployable: configuration, migrations, filters,
-│                            composition of every module
-├── frontend/                React + TypeScript web client (its own README)
-├── docker/                  LocalStack bootstrap (S3 bucket, SQS queues + DLQs)
-└── .github/workflows/       CI
+JurisCore/
+├── juriscore-common/         Shared kernel
+├── juriscore-organization/   Firms (tenant boundary)
+├── juriscore-identity/       Auth, users, RBAC
+├── juriscore-casework/       Clients, matters, assignments, timeline
+├── juriscore-case-management/ Courts, hearings, tasks, deadlines, reminders
+├── juriscore-documents/      Documents and storage policy
+├── juriscore-billing/        Invoices, payments, billing profile
+├── juriscore-notifications/  In-app notifications
+├── juriscore-audit/          Audit trail
+├── juriscore-app/            Deployable app, config, Flyway migrations
+├── frontend/                 React + TypeScript client (own README)
+├── docker/                   LocalStack bootstrap (S3 bucket, SQS queues)
+├── docs/                     Architecture, local verification, screenshots
+├── scripts/                  Build diagnosis, API smoke test
+├── Dockerfile                Production image (multi-stage)
+└── docker-compose.yml        Local development stack only — not for production
 ```
 
-## Running it
+---
 
-### Prerequisites
+## Prerequisites
 
 - JDK 21
 - Maven 3.9+
 - Docker and Docker Compose
-- Node 20+ and npm, for the web client
+- Node 20+ and npm (for the web client)
 
-### Everything in containers
+---
 
-```bash
-docker compose up --build
-```
+## Local development
 
-The API comes up on <http://localhost:8080>, Swagger UI on
-<http://localhost:8080/swagger-ui.html>.
-
-### Infrastructure in containers, app from your IDE
-
-Faster to iterate on, and the usual way to work:
+### 1. Start the infrastructure
 
 ```bash
 docker compose up -d postgres redis localstack
+```
+
+PostgreSQL and Redis are ready in a few seconds; LocalStack takes around 25 and creates the
+document bucket on the way up. LocalStack is optional until you try to upload a document —
+that flow has the browser `PUT` straight to storage, so without it the upload fails at a
+step the server never sees.
+
+### 2. Run the backend
+
+```bash
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)   # macOS
 mvn -pl juriscore-app -am spring-boot:run
 ```
 
-The `local` profile is active by default and carries a development JWT secret, so a
-fresh checkout runs with no further setup.
+The `local` profile is active by default and carries a development JWT secret, so a fresh
+checkout runs with no further setup. Flyway applies the migrations at startup. The API is on
+`http://localhost:8080`, Swagger UI on `http://localhost:8080/swagger-ui.html`.
 
-LocalStack is optional until you try to upload a document. That flow has the *browser* PUT
-the file straight to a presigned S3 URL, so with LocalStack stopped the upload fails at a
-step the server never sees. Against a local endpoint the URL is signed path-style
-(`http://localhost:4566/juriscore-documents/...`) because the virtual-host form the SDK
-produces by default resolves in almost no browser — see
-[docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md#document-upload-needs-localstack-and-needs-it-reachable-from-the-browser).
-
-### The web client
+### 3. Run the frontend
 
 ```bash
 cd frontend
@@ -140,267 +182,263 @@ npm install
 npm run dev
 ```
 
-<http://localhost:3000>. **Start the API first** — the dev server proxies `/api` to
-`http://localhost:8080`, so the browser's requests are same-origin and CORS is not
-involved. If the backend is not up, or is on another port, every call returns a dev-server
-404 and the interface reports it as a missing record; point the proxy with
-`VITE_API_PROXY_TARGET=http://localhost:9090 npm run dev`.
+The client is on `http://localhost:3000` and proxies `/api`, `/actuator`, `/v3/api-docs` and
+`/swagger-ui` to port 8080, so the browser makes same-origin requests and CORS is not
+involved in development.
 
-The port is pinned to 3000 deliberately: the backend's default CORS allow-list is
-`http://localhost:3000`, which is what a *deployed* frontend calling the API directly
-needs. Register a firm from the sign-in page, or sign in with an account you created
-through the API.
-
-`npm run verify` in `frontend/` runs typecheck, lint, tests and a production build — the
-gate the frontend has to pass. See [frontend/README.md](frontend/README.md).
-
-### First requests
+### 4. Optional: demo data and API smoke test
 
 ```bash
-# 1. Register a firm and its first administrator
-curl -sX POST http://localhost:8080/api/v1/auth/register \
-  -H 'Content-Type: application/json' \
-  -d '{
-        "firmName": "Sharma & Associates",
-        "firstName": "Asha",
-        "lastName": "Menon",
-        "email": "asha@sharma-legal.test",
-        "password": "Adv0cate!Chamber",
-        "timezone": "Asia/Kolkata"
-      }'
-
-# 2. Sign in (returns accessToken + refreshToken)
-curl -sX POST http://localhost:8080/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email": "asha@sharma-legal.test", "password": "Adv0cate!Chamber"}'
-
-# 3. Call something protected
-curl -s http://localhost:8080/api/v1/users/me \
-  -H "Authorization: Bearer <accessToken>"
+node frontend/scripts/fixtures.mjs      # seeds a firm with matters, invoices, documents
+python3 scripts/smoke-test.py           # exercises the API end to end against a running app
 ```
 
-## API conventions
+[docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md) is the full procedure, from
+prerequisites through teardown.
 
-Every endpoint answers in one of two shapes.
+---
 
-```jsonc
-// success
-{ "success": true, "data": { }, "message": "Firm registered successfully" }
+## Configuration
 
-// failure
-{ "success": false, "error": { "code": "EMAIL_ALREADY_EXISTS", "message": "…" } }
-```
+Every setting is an environment variable with a local-friendly default. Copy `.env.example`
+to `.env` for local work; `.env` is gitignored and must never hold production values.
 
-`error.code` is a stable enum from `ErrorCode` — clients switch on it; `message` is for
-humans and may change. Validation failures add `error.details[]` with per-field messages.
-
-### Phase 1 endpoints
-
-| Method | Path | Access |
+| Variable | Required in production | Purpose |
 |---|---|---|
-| POST | `/api/v1/auth/register` | public |
-| POST | `/api/v1/auth/login` | public |
-| POST | `/api/v1/auth/refresh` | public |
-| POST | `/api/v1/auth/logout` | authenticated |
-| POST | `/api/v1/auth/forgot-password` | public |
-| POST | `/api/v1/auth/reset-password` | public |
-| GET/PUT | `/api/v1/users/me` | authenticated |
-| POST | `/api/v1/users/me/change-password` | authenticated |
-| GET | `/api/v1/users` | firm staff |
-| GET | `/api/v1/users/{id}` | firm staff |
-| POST | `/api/v1/users/invite` | `FIRM_ADMIN` |
-| PATCH | `/api/v1/users/{id}/status` | `FIRM_ADMIN` |
-| PATCH | `/api/v1/users/{id}/role` | `FIRM_ADMIN` |
-| GET/PUT | `/api/v1/organizations/current` | authenticated / `FIRM_ADMIN` |
+| `JURISCORE_JWT_SECRET` | **Yes** | Base64 HMAC key, ≥256 bits. No default — the application refuses to start without it |
+| `JURISCORE_DB_URL` | **Yes** | JDBC URL for PostgreSQL |
+| `JURISCORE_DB_USER` / `JURISCORE_DB_PASSWORD` | **Yes** | Database credentials |
+| `JURISCORE_REDIS_HOST` / `JURISCORE_REDIS_PORT` | **Yes** | Redis, used for distributed rate limiting |
+| `JURISCORE_CORS_ORIGINS` | **Yes** | Comma-separated allowed origins. Defaults to `http://localhost:3000` |
+| `JURISCORE_PUBLIC_URL` | Recommended | Public base URL, used in the OpenAPI document |
+| `AWS_REGION` | **Yes** | Region for S3 |
+| `JURISCORE_AWS_ENDPOINT` | No | Endpoint override for LocalStack. **Leave empty in production** so the real AWS endpoints and the instance/task role are used |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | No | Read *only* when an endpoint override is set. Production authenticates with the task role |
+| `JURISCORE_DB_POOL_SIZE` | No | HikariCP maximum pool size (default 20) |
+| `JURISCORE_DOC_MAX_SIZE` | No | Maximum document size in bytes (default 50 MB) |
+| `JURISCORE_OVERDUE_SWEEP` | No | Enables the overdue-invoice sweep (default true) |
+| `SERVER_PORT` | No | HTTP port (default 8080) |
 
-## Decisions worth knowing about
+Frontend: `VITE_API_BASE_URL` sets the API origin for a client deployed separately from the
+API. Leave it unset when the app and API are served from one origin behind a reverse proxy —
+the client then uses relative paths.
 
-**Tenant isolation has three layers; two are load-bearing today.** Every tenant-scoped
-table carries `organization_id` (enforced by a check constraint), and every repository
-query filters on it. The third, `TenantGuard`, is built and unit-tested but not yet called
-by anything — no Phase 1 entity is tenant-scoped through it, since `User` deliberately is
-not (`SUPER_ADMIN` has no firm). It is the substrate Phase 2 hangs cases and documents off.
-Said plainly here because "defence in depth" is the kind of claim that quietly stops being
-true.
+---
 
-**A foreign tenant's resource returns 404, not 403.** A 403 confirms the record exists.
+## Running with Docker
 
-**Access tokens are short-lived and revocable.** Fifteen minutes, and they carry a
-`token_generation` claim checked against the user row on each request. Changing a
-password, changing a role or suspending an account bumps that number, so outstanding
-tokens stop validating immediately instead of lingering for their remaining life. The
-cost is one indexed primary-key lookup per request — the alternative is a suspended
-lawyer reading case files after being locked out.
+### Development stack
 
-**Refresh tokens rotate and detect reuse.** Only a SHA-256 hash is stored. Each refresh
-revokes the presented token and issues a new one; presenting an already-rotated token
-means a replay or a stolen chain, so every session for that user is revoked. That
-revocation commits in its own transaction — the failure response rolls the caller's
-transaction back, which would otherwise undo it.
+`docker-compose.yml` is **for local development only**. It starts PostgreSQL, Redis and
+LocalStack, and carries a development JWT secret and default database credentials in plain
+text. Do not deploy it.
 
-**Password reset never reveals whether an address is registered**, and sign-in with an
-unknown address still runs a BCrypt comparison so the timing matches a wrong password.
+```bash
+docker compose up --build        # everything, application included
+docker compose up -d postgres redis localstack   # infrastructure only
+```
 
-**Optimistic locking everywhere.** Every entity carries `@Version`, so two lawyers
-editing the same case get a `CONCURRENT_MODIFICATION` conflict rather than a silent
-overwrite (PRD §41.1).
+### Production image
 
-**Rate limiting lives in Redis, not in memory.** A per-instance counter multiplies the
-real limit by the number of running tasks — exactly wrong under autoscaling. It fails
-open: losing the cache should degrade protection, not take the platform down.
+The `Dockerfile` builds a production image: a multi-stage build with a JRE-only runtime, a
+non-root user, container-aware heap sizing, a health check against
+`/actuator/health/readiness`, and `SPRING_PROFILES_ACTIVE=prod` as its default.
 
-**Email is globally unique, not unique per firm, and uniqueness is case-insensitive.**
-Sign-in presents an address and a password with no tenant hint, so it has to resolve to
-exactly one account. The constraint is a functional unique index on `lower(email)` rather
-than `UNIQUE(email)`: the application matches addresses case-insensitively, so a plain
-constraint would admit both `asha@firm.test` and `ASHA@firm.test`, and two rows matching
-one lookup turn sign-in into a 500. It is also the only form the planner can use for the
-`lower(email) = lower(?)` that Spring Data generates — measured on 20k users, 5.3 ms of
-sequential scan versus 0.08 ms indexed, on the busiest endpoint in the system.
+```bash
+docker build -t juriscore:latest .
+```
 
-**The rate limiter counts and expires in one atomic Lua script.** `INCR` followed by
-`EXPIRE` is two round-trips, and a process that dies between them strands a counter with
-no TTL — locking that caller out of sign-in permanently.
+Configuration is supplied at run time through the environment variables above. The image
+contains no secrets.
 
-**`open-in-view` is off** and Hibernate validates the Flyway-built schema rather than
-generating one.
+---
 
 ## Testing
 
 ```bash
-mvn test        # unit tests
-mvn verify      # + integration tests (needs Docker for Testcontainers)
+# Backend — unit tests plus Testcontainers integration tests (needs Docker running)
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+mvn -B clean verify
+
+# Frontend — typecheck, ESLint, tests and production build
+cd frontend
+npm run verify
 ```
+
+Last verified results:
+
+| Suite | Result |
+|---|---|
+| Backend unit tests (`mvn -B test`, all 10 modules) | 617 tests, 0 failures, 0 errors, 0 skipped |
+| Backend integration tests (Failsafe, `mvn -B verify`) | require a running Docker daemon — see below |
+| Frontend (`npm run verify`) | 206 tests, 0 failures |
+| TypeScript (`npm run typecheck`) | clean |
+| ESLint (`npm run lint`) | 0 errors |
+| Production build (`npm run build`) | passes |
+
+The backend integration tests start real PostgreSQL and Redis containers through
+Testcontainers, so Docker must be running. Individual suites:
 
 ```bash
-cd frontend && npm run verify   # typecheck, lint, tests, production build
+mvn -B test                                   # unit tests only, no Docker needed
+mvn -B verify -Dit.test=RefreshTokenConcurrencyIT
+cd frontend && npx vitest run src/lib/auth
 ```
 
-For a full clean-machine procedure — prerequisites, infrastructure, startup, health,
-smoke tests, image build and teardown — see **[docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md)**,
-which ends in a single paste-able block. Against a running application,
-`python3 scripts/smoke-test.py` checks the same guarantees over real HTTP.
+---
 
-Integration tests run against a real PostgreSQL container rather than H2. Schemas, check
-constraints, `timestamptz` semantics and functional indexes are the parts an in-memory
-database gets subtly wrong, and they are the parts worth testing.
+## Security
 
-| Suite | What it holds down |
+**Authentication.** BCrypt at strength 12. Access tokens are short-lived JWTs; refresh
+tokens are long-lived, stored only as hashes, and rotated on every use. Presenting an
+already-rotated token is treated as theft and revokes every session for that user. Rotation
+takes a `SELECT … FOR UPDATE` row lock, so two concurrent refreshes cannot both succeed.
+Sessions are revoked globally through a token-generation claim, which invalidates access
+tokens that have not yet expired.
+
+**Authorization.** Role checks live next to each handler as `@PreAuthorize`. The frontend's
+permission map mirrors them, so the UI does not offer actions the server will refuse — but
+the server is the only authority.
+
+**Tenant isolation.** The organization comes from the access token and from nowhere else.
+Repository lookups are scoped by `organization_id` and services check `TenantGuard`;
+cross-tenant access returns `404` so record existence is not disclosed.
+
+**Rate limiting.** A fixed-window limiter in Redis, keyed by user for authenticated traffic
+and by peer address for anonymous traffic, with a much tighter budget on the authentication
+endpoints. When Redis is unavailable the policy splits deliberately: authenticated API
+traffic is allowed through, while authentication endpoints fall back to a bounded
+per-instance limiter, so a Redis outage cannot remove the brute-force limit.
+
+**Trusted proxy.** The client address comes from Tomcat's `RemoteIpValve`
+(`forward-headers-strategy: native`), which honours `X-Forwarded-For` only when the request
+arrived from a trusted proxy. No application code parses a forwarding header.
+
+**CORS.** Explicit origin list, no wildcard, credentials disallowed — the API authenticates
+with a bearer header the client sets itself, so no ambient credential should ever ride along.
+
+**Documents.** Uploads go straight to object storage over a presigned URL; bytes never pass
+through the application. Content type, size and filename are validated server-side against
+an allowlist, and again against what storage actually reports at completion. Storage keys
+are derived from firm, matter and document identifiers, never from the uploaded filename.
+
+**API documentation.** Swagger UI and `/v3/api-docs` are available in development and
+disabled in the `prod` profile, in both springdoc and the security chain.
+
+**Error handling.** Clients receive a generic message and an incident id; stack traces, SQL,
+constraint names and schema details stay in the log. Credential-shaped values are redacted
+before they reach the audit trail.
+
+No third-party security audit or certification has been performed on this codebase.
+
+---
+
+## Deployment
+
+### Required infrastructure
+
+- **PostgreSQL 16** — the application user needs rights to create the eight schemas Flyway
+  manages, or they can be pre-created.
+- **Redis 7** — used for distributed rate limiting. A Redis outage degrades rate limiting
+  rather than taking the application down.
+- **S3-compatible object storage** — one bucket for documents. The application authenticates
+  with the instance/task role in production; leave `JURISCORE_AWS_ENDPOINT` empty.
+- **A reverse proxy or load balancer** terminating TLS.
+
+### Deploying
+
+1. Build the image: `docker build -t juriscore:<tag> .`
+2. Supply the environment variables listed under [Configuration](#configuration) from your
+   secret manager. Never bake them into the image.
+3. Set `SPRING_PROFILES_ACTIVE=prod` explicitly rather than relying on the image default.
+4. Flyway applies migrations automatically at startup. On a first deployment against an
+   empty database this creates the whole schema; check the startup log for the applied
+   version.
+5. Point the load balancer's health check at `/actuator/health/readiness`. Liveness and
+   readiness are anonymous; everything else under `/actuator` requires `SUPER_ADMIN`, and
+   health details are hidden in production.
+6. Build and serve the frontend (`npm run build` produces `frontend/dist/`) from a static
+   host or the same origin as the API behind the proxy. Set `VITE_API_BASE_URL` only if the
+   client is served from a different origin.
+
+### Deployment prerequisites the repository cannot guarantee
+
+These are real requirements that no amount of application code satisfies. Verify each one.
+
+- **The load balancer's source address must fall inside
+  `server.tomcat.remoteip.internal-proxies`** (RFC1918, loopback, link-local and CGNAT
+  ranges by default). An in-VPC AWS ALB always does. A proxy with a public address does not,
+  and the consequence is quiet but severe: the valve discards `X-Forwarded-For`, every
+  caller is keyed to the proxy's address, and the whole internet shares one rate-limit
+  bucket. Confirm this before going live and widen the range if your proxy sits outside it.
+- **An S3 lifecycle rule to expire orphaned objects.** A document delete marks the metadata
+  deleted and then removes the object after commit; if that removal fails the object is
+  left in the bucket on purpose, because the alternative is metadata pointing at nothing.
+  Nothing in this repository creates that lifecycle rule.
+- **TLS termination, backups, log shipping and monitoring** are all deployment concerns.
+- **Database migration review.** Flyway runs on startup; if you prefer migrations gated
+  behind a deliberate step, run them separately and disable `spring.flyway.enabled`.
+
+### Production checklist
+
+- [ ] Secrets supplied from a secret manager, not baked into the image
+- [ ] Production PostgreSQL configured and reachable
+- [ ] Redis configured and reachable
+- [ ] S3 bucket created, task role granted access, `JURISCORE_AWS_ENDPOINT` empty
+- [ ] S3 lifecycle rule for orphaned objects configured
+- [ ] Load balancer address verified against the internal-proxies range
+- [ ] `JURISCORE_CORS_ORIGINS` set to the real frontend origin
+- [ ] `SPRING_PROFILES_ACTIVE=prod` set explicitly
+- [ ] Flyway migrations applied and the startup log checked
+- [ ] Health checks wired to `/actuator/health/readiness`
+- [ ] `VITE_API_BASE_URL` set if the client is served from another origin
+- [ ] HTTPS enforced at the proxy
+- [ ] Backups, log shipping and monitoring configured
+
+---
+
+## Known limitations and operational notes
+
+**Application limitations**
+
+- Domain events are delivered in-process, ordered after commit. SQS queues exist in the
+  local stack and in configuration, but no consumer is deployed — nothing is processed
+  out-of-process.
+- Refresh tokens are stored in browser `localStorage`, which is readable by any script on
+  the origin. The hardened alternative is an httpOnly, SameSite cookie issued by the
+  backend; that is a backend change and has not been made. Access tokens are held in memory
+  only.
+- One email address maps to one account platform-wide, so the same person cannot hold
+  accounts at two firms.
+- Full-text search over clients and matters uses `LIKE` with a leading wildcard and has no
+  trigram index, so it scans the firm's rows. Fine at current scale; add `pg_trgm` before it
+  is not.
+
+**Future improvements**
+
+- Move document storage to its own deployable when it earns a separate scaling profile.
+- Presigned URL lifetime is asserted only as "positive" in tests; a concrete upper bound
+  would be a better guard.
+
+---
+
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module boundaries, event flow, design
+  decisions and their trade-offs
+- [docs/LOCAL_VERIFICATION.md](docs/LOCAL_VERIFICATION.md) — full local verification
+  procedure
+- [frontend/README.md](frontend/README.md) — web client structure, scripts and conventions
+
+---
+
+## Screenshots
+
+| | |
 |---|---|
-| `AuthFlowIT` | Registration, sign-in, rotation, reuse detection, invitation, cross-tenant reads, and the error envelope for unknown paths, missing params and bad enum values |
-| `SecurityGuaranteesIT` | Suspension/role/password changes killing live access tokens; refresh rotation; reuse revocation surviving the failed request; single-use reset links; RBAC; tenant isolation on **writes** |
-| `RateLimitIT` | Limit enforcement, bucket isolation, atomic expiry, recovery of a stranded counter, atomicity under 200 concurrent callers, fail-open when Redis is down |
-| `TenantGuardTest` | The guard's contract, ahead of Phase 2 depending on it |
-| `ActuatorExposureIT` | Health is public and UP; readiness covers the database and liveness does not; env/configprops/beans/metrics closed even to a firm admin; no response carries the signing secret |
-| `AuthServiceTest`, `JwtServiceTest`, `StrongPasswordValidatorTest` | Lockout, enumeration resistance, token round-trip, signature/issuer/expiry rejection, password policy |
+| ![Matter overview](docs/screenshots/matter-overview.png) | ![Matter documents](docs/screenshots/matter-documents.png) |
+| ![Invoice detail](docs/screenshots/invoice-detail.png) | ![Sign in](docs/screenshots/login.png) |
 
-Two of these encode bugs that were found and fixed during verification, so they are
-regression tests rather than decoration: `SecurityGuaranteesIT.resetLinkIsSingleUse` and
-`RateLimitIT.repairsAnImmortalCounter`.
+The layout is responsive down to phone widths:
 
-The web client has 88 tests over fourteen files, aimed at what is actually easy to get wrong
-rather than at a coverage number: exact decimal arithmetic and HALF_UP rounding; the token
-refresh single-flight under a burst of six parallel 401s; the presigned upload contract,
-including the absent `Authorization` header on the storage request and the expired-link
-retry that mints a new signature; lifecycle and role gating on the invoice page; the auth
-redirect that must not fire while a session is still being restored; and the open-redirect
-check on notification action paths. MSW runs with `onUnhandledRequest: 'error'`, so a
-request nobody wrote a handler for fails the suite instead of passing quietly.
-
-## Configuration
-
-Everything environment-specific is an environment variable with a local default; see
-[`.env.example`](.env.example). Profiles: `local` (default), `docker`, `test`, `prod`.
-
-`JURISCORE_JWT_SECRET` has **no default outside local development** — the application
-refuses to start without it rather than signing tokens with a value from a tutorial.
-Generate one with `openssl rand -base64 48`.
-
-The web client takes one variable, `VITE_API_BASE_URL`, documented in
-[`frontend/.env.example`](frontend/.env.example). It is empty in development, where the
-dev server and the backend's CORS allow-list already agree on `http://localhost:3000`.
-Only `VITE_`-prefixed variables reach the browser and every one of them is compiled into
-the bundle, so nothing secret belongs in that file.
-
-## Roadmap
-
-Phases follow the PRD.
-
-- **Phase 1 — Foundation**: project structure, identity, authentication,
-  PostgreSQL, Docker, CI.
-- **Phase 2 — Core legal system**: clients, lawyers, cases, case timeline.
-- **Phase 3 — Court workflow**: courts, hearings, tasks, deadlines,
-  reminders. Reminders are scheduled and published as domain events when they come due;
-  **nothing delivers them** — there is still no email, SMS or push anywhere in the
-  platform, so a reminder's `SENT` state means "announced on the event bus", not
-  "received by a person".
-- **Phase 4 — Documents** *(this release)*: case documents in S3, presigned upload and
-  download, metadata in PostgreSQL. Files never pass through the application: the browser
-  PUTs to a short-lived signed link and the platform confirms the upload against storage
-  afterwards. **Not implemented, and not claimed anywhere:** malware or content scanning,
-  OCR, previews, full-text search, document version history, external sharing, and any
-  client-facing access — a client of a firm still cannot reach its documents, because the
-  explicit sharing mechanism that would allow it does not exist.
-- **Phase 5 — Billing, notifications and audit** *(this release)*: invoices with
-  server-calculated money, recorded payments, an in-app notification feed with per-user
-  category switches, and an append-only audit trail. Three new modules —
-  `juriscore-billing`, `juriscore-notifications`, `juriscore-audit` — on three new schemas.
-
-  **What Phase 5 is not**, stated plainly because several of these are one word away from
-  what it does:
-
-  - **No payment gateway, and no payment processing of any kind.** JurisCore *records*
-    that money arrived; it never moves any. There is no Stripe, no Razorpay, no card
-    network, no UPI handle and no bank connection. `PaymentMethod.CARD` is a label a person
-    picked from a list, not a charge. No card number, CVV, bank credential or gateway
-    secret is stored anywhere — there is no column that could hold one.
-  - **No GST engine.** Invoices carry a tax rate and a tax amount per line, and that is the
-    whole of it: no CGST/SGST/IGST split, no place-of-supply derivation, no reverse charge,
-    no HSN/SAC codes, no return filing. A firm records the tax it has already worked out.
-    Nothing here is a claim of statutory compliance.
-  - **No accounting integration.** Nothing exports to Tally, Zoho Books or anything else.
-  - **No email, SMS, WhatsApp or push.** Notifications are in-app rows read through the
-    API, and that is the only delivery channel that exists. There is no delivery status
-    column, no provider message id and no retry count — because nothing is sent.
-  - **No SQS or Kafka.** The event bus is still in-process, exactly as in Phase 1. The
-    `notification-queue` and `audit-queue` settings in `application.yml` remain unused
-    placeholders.
-  - **No client billing portal.** A `CLIENT` user reaches no billing endpoint. An invoice
-    references a client because it is a firm-side record *about* them, not a document
-    shared *with* them.
-  - **No credit notes and no refunds.** Correcting an issued invoice means cancelling it
-    and raising another. Half a credit-note subsystem would be worse than none.
-  - **No currency conversion.** Every invoice and payment stores its currency and a payment
-    in a different one is refused rather than converted. There is no FX rate anywhere.
-  - **No analytics and no Redis caching**, both of which earlier notes filed under
-    "Phase 5". Neither is implemented.
-- **Phase 6 — Web client** *(this release)*: a React + TypeScript single-page application
-  in `frontend/`, covering the whole API — sign-in and registration with automatic token
-  refresh, clients, matters and the case timeline, courts, hearings, tasks, deadlines,
-  documents through the presigned flow, invoices and payments, notifications and the audit
-  trail. No backend code was changed for it.
-
-  **What Phase 6 is not:**
-
-  - **No client portal.** A `CLIENT` account signs in and is told there is no workspace for
-    it, because there isn't one — the API exposes no client-facing endpoints. The role is
-    handled honestly rather than given a UI that would 403 on every request.
-  - **Frontend role checks are UX only.** The interface hides actions a role cannot perform
-    so people are not offered buttons that fail. Every one of those rules is enforced by
-    the backend, which is the only thing that decides.
-  - **The frontend calculates no money.** Totals, balances and statuses come from the
-    server. The one exception is a clearly-labelled estimate under an invoice draft being
-    typed, computed in exact decimal arithmetic to match the server's own rounding.
-  - **The refresh token is in `localStorage`.** An httpOnly cookie would be better and is a
-    backend change; it was not made, and the trade-off is recorded in
-    [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §5d rather than glossed over.
-  - **No offline support, service worker, SSR, internationalisation or in-app file
-    preview.** Documents download through a signed link.
-- **Phase 7 — Production**: AWS deployment, monitoring, autoscaling, security hardening,
-  load testing.
-
-## Notes
-
-The source PRD is titled *JurisCore* but refers to the product as *LexFlow* throughout
-the body. This implementation uses **JurisCore** consistently — worth settling before the
-name reaches a public API path or an S3 bucket.
+<img src="docs/screenshots/invoices-mobile.png" alt="Invoices on a phone" width="320">
