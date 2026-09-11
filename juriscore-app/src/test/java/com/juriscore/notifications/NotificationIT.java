@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -212,6 +214,33 @@ class NotificationIT extends AbstractBillingIT {
                 .andExpect(jsonPath("$.data.totalItems").value(2));
     }
 
+    /** The stamp the row actually holds, which is the only authority on "did it change". */
+    private Instant persistedReadAt(String notificationId) {
+        return jdbcTemplate.queryForObject("""
+                SELECT read_at FROM notifications.notifications WHERE id = ?::uuid
+                """, (rs, rowNum) -> {
+            OffsetDateTime value = rs.getObject(1, OffsetDateTime.class);
+            return value == null ? null : value.toInstant();
+        }, notificationId);
+    }
+
+    /**
+     * Reading twice must not move the stamp.
+     *
+     * <p>Asserted against the database rather than against two serialised responses. The
+     * response body is a projection of whatever the entity happens to hold at the moment it
+     * is written, and that is not the same thing as what was stored: {@code TIMESTAMPTZ}
+     * keeps microseconds, so a nanosecond reading taken in the service is rounded on the way
+     * into the row. Comparing the first response to the second therefore compared a
+     * pre-flush value with a post-load one and failed on the representation while the stamp
+     * itself was untouched — a false negative, and on a clock whose readings land on an
+     * exact microsecond (as macOS often does) a test that passes for the wrong reason.
+     *
+     * <p>Reading the column settles it directly. The response assertions are kept as well,
+     * because the contract has two halves: the row does not move, and the caller is told the
+     * same time both times. {@link com.juriscore.common.util.Timestamps} is what makes the
+     * second half true — it stamps at the precision the column stores.
+     */
     @Test
     @DisplayName("marking one read twice does not restamp when it was read")
     void markingReadIsIdempotent() throws Exception {
@@ -222,15 +251,66 @@ class NotificationIT extends AbstractBillingIT {
                 SELECT id::text FROM notifications.notifications WHERE recipient_user_id = ?
                 """, String.class, userIdOf("asha@sharma-legal.test"));
 
-        String firstReadAt = json(mockMvc.perform(post("/api/v1/notifications/" + id + "/read")
+        assertThat(persistedReadAt(id)).as("unread to begin with").isNull();
+
+        String firstResponseReadAt = json(mockMvc.perform(post("/api/v1/notifications/" + id + "/read")
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isOk()).andReturn())
                 .path("data").path("readAt").asText();
+        Instant storedAfterFirstRead = persistedReadAt(id);
+        assertThat(storedAfterFirstRead).as("the first read stamps the row").isNotNull();
+
+        // A clock reading finer than the column would be reported to the caller and then
+        // quietly rounded on the way into the row. The two must agree, or every later read
+        // of this notification returns a different string for a time nobody changed.
+        assertThat(Instant.parse(firstResponseReadAt))
+                .as("the time the caller is given is the time the row keeps")
+                .isEqualTo(storedAfterFirstRead);
+
+        // Far enough apart that a restamp could not coincide with the original.
+        Thread.sleep(10);
 
         mockMvc.perform(post("/api/v1/notifications/" + id + "/read")
                         .header("Authorization", bearer(token)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.readAt").value(firstReadAt));
+                .andExpect(jsonPath("$.data.readAt").value(firstResponseReadAt));
+
+        assertThat(persistedReadAt(id))
+                .as("the second read must leave the stored stamp alone")
+                .isEqualTo(storedAfterFirstRead);
+    }
+
+    /**
+     * The same guarantee for the bulk endpoint, which takes a different route to the column.
+     *
+     * <p>{@code markAllRead} is a bulk {@code UPDATE … WHERE read_at IS NULL} rather than a
+     * loaded entity, so the {@code readAt == null} guard in {@link
+     * com.juriscore.notifications.domain.Notification#markRead} does not protect it; the
+     * predicate does. Worth pinning separately — the two implementations could drift.
+     */
+    @Test
+    @DisplayName("read-all does not restamp notifications that were already read")
+    void readAllDoesNotRestampAlreadyRead() throws Exception {
+        Ledger ledger = openLedger("Sharma & Associates", "asha@sharma-legal.test");
+        String token = ledger.firm().adminToken();
+        issued(token, ledger.clientId(), null);
+        String id = jdbcTemplate.queryForObject("""
+                SELECT id::text FROM notifications.notifications WHERE recipient_user_id = ?
+                """, String.class, userIdOf("asha@sharma-legal.test"));
+
+        mockMvc.perform(post("/api/v1/notifications/" + id + "/read")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk());
+        Instant stamped = persistedReadAt(id);
+
+        Thread.sleep(10);
+
+        mockMvc.perform(post("/api/v1/notifications/read-all")
+                        .header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.marked").value(0));
+
+        assertThat(persistedReadAt(id)).isEqualTo(stamped);
     }
 
     @Test
