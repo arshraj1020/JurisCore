@@ -4,6 +4,7 @@ import com.juriscore.common.error.ApiException;
 import com.juriscore.common.error.ErrorCode;
 import com.juriscore.common.event.EventPublisher;
 import com.juriscore.common.security.TenantGuard;
+import com.juriscore.common.util.Timestamps;
 import com.juriscore.notifications.domain.Notification;
 import com.juriscore.notifications.domain.NotificationPreference;
 import com.juriscore.notifications.domain.NotificationType;
@@ -19,7 +20,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -167,14 +167,14 @@ public class NotificationService {
     @Transactional
     public Notification markRead(UUID notificationId, UUID recipientUserId, UUID organizationId) {
         Notification notification = require(notificationId, recipientUserId, organizationId);
-        notification.markRead(Instant.now());
+        notification.markRead(Timestamps.now());
         return notification;
     }
 
     /** @return how many were still unread */
     @Transactional
     public int markAllRead(UUID recipientUserId, UUID organizationId) {
-        return notificationRepository.markAllRead(organizationId, recipientUserId, Instant.now());
+        return notificationRepository.markAllRead(organizationId, recipientUserId, Timestamps.now());
     }
 
     /**
