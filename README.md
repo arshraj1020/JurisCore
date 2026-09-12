@@ -1,7 +1,7 @@
 <div align="center">
 
 <!-- Animated Typing Header -->
-<a href="#"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=32&pause=1000&color=2E86AB&center=true&vCenter=true&width=700&lines=%E2%9A%96%EF%B8%8F+JurisCore;Matters.+Hearings.+Deadlines.+Billing.;One+Tenant+Boundary%2C+Enforced+Everywhere;" alt="Typing SVG" />
+<a href="#"><img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=700&size=32&pause=1000&color=2E86AB&center=true&vCenter=true&width=700&lines=%E2%9A%96%EF%B8%8F+JurisCore;Matters.+Hearings.+Billing.;Tenant+Boundary%2C+Enforced+Everywhere;" alt="Typing SVG" />
 </a>
 
 <h3>Legal Case Management & Court Workflow for Law Firms</h3>
