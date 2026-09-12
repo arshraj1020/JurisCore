@@ -43,7 +43,10 @@ public abstract class AbstractIntegrationTest {
     }
 
     static final PostgreSQLContainer<?> POSTGRES =
-            new PostgreSQLContainer<>("postgres:16-alpine")
+            // pgvector/pgvector:pg16: postgres:16 plus the pgvector extension the
+            // legal_research schema (V7) requires. See docker-compose.yml.
+            new PostgreSQLContainer<>(DockerImageName.parse("pgvector/pgvector:pg16")
+                    .asCompatibleSubstituteFor("postgres"))
                     .withDatabaseName("juriscore")
                     .withUsername("juriscore")
                     .withPassword("juriscore");
@@ -107,7 +110,9 @@ public abstract class AbstractIntegrationTest {
                                billing.payments,
                                notifications.notifications,
                                notifications.notification_preferences,
-                               audit.audit_events
+                               audit.audit_events,
+                               legal_research.legal_chunks,
+                               legal_research.legal_judgments
                 CASCADE
                 """);
     }

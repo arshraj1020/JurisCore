@@ -47,7 +47,7 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-    schemas: organization,identity,casework,case_management,documents,billing,notifications,audit
+    schemas: organization,identity,casework,case_management,documents,billing,notifications,audit,legal_research
     default-schema: public
     validate-on-migrate: true
     # Never on: an out-of-order migration in production hides a real drift problem.
@@ -205,6 +205,25 @@ juriscore:
     # Presigned links are bearer credentials for one object. Keep the window small.
     upload-url-expiry: ${JURISCORE_S3_UPLOAD_URL_EXPIRY:15m}
     download-url-expiry: ${JURISCORE_S3_DOWNLOAD_URL_EXPIRY:5m}
+
+  legal-research:
+    embedding:
+      # Config is descriptive, not authoritative: the pgvector column is fixed at
+      # 1536 dimensions by the V7 migration (see EmbeddingSchema.VECTOR_DIMENSIONS).
+      # LegalResearchProperties fails startup if this is changed without a matching
+      # migration, rather than silently writing embeddings of the wrong width.
+      model: ${JURISCORE_LEGAL_RESEARCH_EMBEDDING_MODEL:text-embedding-3-small}
+      dimensions: ${JURISCORE_LEGAL_RESEARCH_EMBEDDING_DIMENSIONS:1536}
+      # "openai" (default) or "fake" (a deterministic, no-network stand-in — see
+      # FakeEmbeddingClient). The test profile sets this to "fake".
+      provider: ${JURISCORE_LEGAL_RESEARCH_EMBEDDING_PROVIDER:openai}
+      # No default, unlike the JWT secret: unset does not stop the application starting,
+      # only refuses embedding calls until it is set. Never logged.
+      api-key: ${JURISCORE_LEGAL_RESEARCH_EMBEDDING_API_KEY:}
+    llm:
+      model: ${JURISCORE_LEGAL_RESEARCH_LLM_MODEL:gpt-4o-mini}
+    chunking:
+      max-chunk-chars: ${JURISCORE_LEGAL_RESEARCH_MAX_CHUNK_CHARS:1800}
 
   documents:
     # Refused above this, both when the upload is requested and again against the size

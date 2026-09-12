@@ -10,7 +10,9 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16 is postgres:16 plus the pgvector extension binary,
+    # needed by the legal_research schema (V7 migration). Same Postgres 16 otherwise.
+    image: pgvector/pgvector:pg16
     container_name: juriscore-postgres
     environment:
       POSTGRES_DB: juriscore

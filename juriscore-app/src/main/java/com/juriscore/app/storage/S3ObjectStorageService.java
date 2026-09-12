@@ -9,10 +9,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
+import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
@@ -112,6 +114,27 @@ public class S3ObjectStorageService implements ObjectStorageService {
             return new PresignedUrl(presigned.url().toString(), expiry, Instant.now().plus(expiry));
         } catch (SdkException e) {
             throw new ObjectStorageException("Could not create a download link for " + key, e);
+        }
+    }
+
+    @Override
+    public Optional<byte[]> getObject(String key) {
+        try {
+            ResponseBytes<GetObjectResponse> response = s3Client.getObjectAsBytes(
+                    GetObjectRequest.builder()
+                            .bucket(properties.getDocumentBucket())
+                            .key(key)
+                            .build());
+            return Optional.of(response.asByteArray());
+        } catch (NoSuchKeyException e) {
+            return Optional.empty();
+        } catch (AwsServiceException e) {
+            if (e.statusCode() == 404 || e.statusCode() == 403) {
+                return Optional.empty();
+            }
+            throw new ObjectStorageException("Could not read object " + key, e);
+        } catch (SdkException e) {
+            throw new ObjectStorageException("Could not read object " + key, e);
         }
     }
 

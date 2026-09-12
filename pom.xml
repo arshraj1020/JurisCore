@@ -29,6 +29,7 @@
         <module>juriscore-billing</module>
         <module>juriscore-notifications</module>
         <module>juriscore-audit</module>
+        <module>juriscore-legal-research</module>
         <module>juriscore-app</module>
     </modules>
 
@@ -80,6 +81,8 @@
         -->
         <lombok.version>1.18.34</lombok.version>
         <maven-enforcer-plugin.version>3.4.1</maven-enforcer-plugin.version>
+        <!-- Apache Tika: judgment text extraction (juriscore-legal-research). -->
+        <tika.version>2.9.2</tika.version>
     </properties>
 
     <dependencyManagement>
@@ -114,6 +117,17 @@
                 <groupId>org.springdoc</groupId>
                 <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
                 <version>${springdoc.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-core</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-parsers-standard-package</artifactId>
+                <version>${tika.version}</version>
             </dependency>
 
             <!-- Internal modules -->
@@ -160,6 +174,11 @@
             <dependency>
                 <groupId>com.juriscore</groupId>
                 <artifactId>juriscore-audit</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.juriscore</groupId>
+                <artifactId>juriscore-legal-research</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

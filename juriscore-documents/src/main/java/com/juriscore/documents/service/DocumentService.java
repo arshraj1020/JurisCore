@@ -226,6 +226,26 @@ public class DocumentService {
         return document;
     }
 
+    /**
+     * Same lookup as {@link #requireLive}, without the additional {@link TenantGuard}
+     * check.
+     *
+     * <p>{@code TenantGuard.check} requires an authenticated {@code CurrentUser} on the
+     * request thread — the right belt-and-braces re-check for something acting on a live
+     * HTTP request, which is what every other caller of this class is. A background job
+     * (Legal Research's async judgment ingestion, running off a domain event, on no
+     * request thread at all) has no such principal and does not need one:
+     * {@code organizationId} here comes from a row that job's own module already owns and
+     * has already tenant-scoped ({@code LegalJudgment.organizationId}), not from a
+     * caller's claim about who they are. The repository predicate — the first and load-
+     * bearing line of defence in both methods — is identical.
+     */
+    @Transactional(readOnly = true)
+    public CaseDocument findLive(UUID documentId, UUID organizationId) {
+        return documentRepository.findByIdAndOrganizationIdAndDeletedAtIsNull(documentId, organizationId)
+                .orElseThrow(() -> ApiException.notFound(ErrorCode.DOCUMENT_NOT_FOUND, documentId));
+    }
+
     @Transactional(readOnly = true)
     public Page<CaseDocument> listForCase(UUID caseId, UUID organizationId, DocumentStatus status,
                                           Pageable pageable) {
