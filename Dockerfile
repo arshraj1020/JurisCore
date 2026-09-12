@@ -30,6 +30,7 @@ COPY juriscore-documents/pom.xml juriscore-documents/
 COPY juriscore-billing/pom.xml juriscore-billing/
 COPY juriscore-notifications/pom.xml juriscore-notifications/
 COPY juriscore-audit/pom.xml juriscore-audit/
+COPY juriscore-legal-research/pom.xml juriscore-legal-research/
 COPY juriscore-app/pom.xml juriscore-app/
 COPY juriscore-common/src juriscore-common/src
 COPY juriscore-organization/src juriscore-organization/src
@@ -40,6 +41,7 @@ COPY juriscore-documents/src juriscore-documents/src
 COPY juriscore-billing/src juriscore-billing/src
 COPY juriscore-notifications/src juriscore-notifications/src
 COPY juriscore-audit/src juriscore-audit/src
+COPY juriscore-legal-research/src juriscore-legal-research/src
 COPY juriscore-app/src juriscore-app/src
 
 # Tests need Docker (Testcontainers) and run in CI, not inside an image build.

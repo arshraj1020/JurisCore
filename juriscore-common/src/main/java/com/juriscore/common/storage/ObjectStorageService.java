@@ -64,6 +64,21 @@ public interface ObjectStorageService {
     Optional<StoredObject> head(String key);
 
     /**
+     * The object's bytes, or empty if nothing is stored at {@code key}.
+     *
+     * <p>This is the one deliberate exception to "bytes never pass through the
+     * application" above. Legal Precedent Intelligence's server-side text extraction
+     * (Apache Tika, off the request path) has no other way to read a judgment's content —
+     * there is no client to hand a presigned GET to in a background job. It remains
+     * bounded, backend-only work already gated by the existing document size ceiling, not
+     * a general-purpose proxy for every document in the platform: nothing outside judgment
+     * ingestion calls this method.
+     *
+     * @throws ObjectStorageException if storage could not be reached or refused the read
+     */
+    Optional<byte[]> getObject(String key);
+
+    /**
      * Removes the object. Idempotent: deleting something already gone is not an error.
      *
      * @throws ObjectStorageException if storage refused or could not be reached — the

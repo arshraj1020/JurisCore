@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.juriscore</groupId>
+        <artifactId>juriscore-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>juriscore-legal-research</artifactId>
+    <name>JurisCore :: Legal Research</name>
+    <description>
+        Legal Precedent Intelligence: judgment ingestion, hybrid (pgvector + PostgreSQL
+        full-text) retrieval, and evidence-grounded precedent analysis.
+    </description>
+
+    <dependencies>
+        <!--
+            One edge, to documents, for the same reason documents takes casework: a
+            judgment IS a case document (uploaded through the exact same S3-presigned
+            pipeline), just one this module additionally extracts, chunks and indexes.
+            This module never re-implements storage or upload handling — it reacts to
+            DocumentUploadCompletedEvent and reads through ObjectStorageService, both
+            already exported by juriscore-common/juriscore-documents.
+
+            juriscore-casework and juriscore-common arrive transitively, as they do for
+            documents itself.
+        -->
+        <dependency>
+            <groupId>com.juriscore</groupId>
+            <artifactId>juriscore-documents</artifactId>
+        </dependency>
+
+        <!--
+            PgVectorType binds a pgvector column via the JDBC driver's own PGobject —
+            deliberately not an extra pgvector-java dependency, see its javadoc. That
+            needs the driver at COMPILE scope in this module specifically:
+            juriscore-app depends on org.postgresql:postgresql too, but only at
+            `runtime` scope (it never references a JDBC type directly, only Flyway and
+            the datasource need the class at runtime), and runtime-scope dependencies
+            are not exported to modules that depend on juriscore-app transitively in
+            the other direction anyway — this module is compiled on its own, before
+            juriscore-app exists in the reactor. No version here: it comes from the
+            same spring-boot-dependencies-managed coordinate juriscore-app already
+            uses, so the two can never drift apart.
+        -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+
+        <!-- Judgment text extraction. tika-parsers-standard-package brings the PDF/Office
+             parsers (PDFBox, POI) that tika-core alone does not. -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

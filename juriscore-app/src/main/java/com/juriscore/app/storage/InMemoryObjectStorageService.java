@@ -55,6 +55,16 @@ public class InMemoryObjectStorageService implements ObjectStorageService {
     /** Canonical object key to what is stored under it. */
     private final Map<String, StoredObject> objects = new ConcurrentHashMap<>();
 
+    /**
+     * Actual bytes, keyed the same way — separate from {@link #objects} because most
+     * callers of {@link #put(String, long, String)} only care about size/content-type
+     * (the class javadoc's "stores no bytes at all" was true until Legal Precedent
+     * Intelligence needed a test double that could feed real content through Tika). A key
+     * present in {@link #objects} but not here is exactly the pre-existing behaviour:
+     * {@link #getObject} answers empty for it, the same as if nothing were stored.
+     */
+    private final Map<String, byte[]> contents = new ConcurrentHashMap<>();
+
     /** Issued link handle to the object key it was issued for. */
     private final Map<String, String> links = new ConcurrentHashMap<>();
 
@@ -81,6 +91,11 @@ public class InMemoryObjectStorageService implements ObjectStorageService {
     }
 
     @Override
+    public Optional<byte[]> getObject(String key) {
+        return Optional.ofNullable(contents.get(key));
+    }
+
+    @Override
     public Optional<StoredObject> head(String key) {
         return Optional.ofNullable(objects.get(key));
     }
@@ -88,6 +103,7 @@ public class InMemoryObjectStorageService implements ObjectStorageService {
     @Override
     public void delete(String key) {
         objects.remove(key);
+        contents.remove(key);
     }
 
     @Override
@@ -100,6 +116,18 @@ public class InMemoryObjectStorageService implements ObjectStorageService {
     /** Stands in for the browser having completed its PUT to the presigned URL. */
     public void put(String key, long sizeBytes, String contentType) {
         objects.put(key, new StoredObject(key, sizeBytes, contentType));
+    }
+
+    /**
+     * Same as {@link #put(String, long, String)}, but also keeps the real bytes so
+     * {@link #getObject} can hand them back — needed by tests that exercise Legal
+     * Precedent Intelligence's ingestion (Tika extraction runs on whatever this returns).
+     * Ordinary document tests that only ever check size/status keep using the overload
+     * above; nothing about it changes.
+     */
+    public void put(String key, byte[] content, String contentType) {
+        objects.put(key, new StoredObject(key, content.length, contentType));
+        contents.put(key, content);
     }
 
     public boolean contains(String key) {
@@ -128,6 +156,7 @@ public class InMemoryObjectStorageService implements ObjectStorageService {
 
     public void clear() {
         objects.clear();
+        contents.clear();
         links.clear();
     }
 }
