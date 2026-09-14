@@ -29,6 +29,13 @@ juriscore:
   # credentials, LocalStack, or a network.
   aws:
     enabled: false
+  # RecordingEmailSender: invoice email runs end to end — the real service, the real
+  # rules, the real PDF — against a double that captures the message instead of sending
+  # it, and that tests can arm to refuse the next one. No SES, no credentials, no network.
+  email:
+    provider: recording
+    from-address: billing@juriscore.test
+
   # A deterministic, no-network embedding stand-in — see FakeEmbeddingClient. Ingestion
   # tests exercise the real pipeline (extraction, chunking, persistence, status
   # transitions) against it without an OpenAI key or a network call.

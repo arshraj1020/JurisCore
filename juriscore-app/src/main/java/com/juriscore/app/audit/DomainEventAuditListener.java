@@ -5,6 +5,8 @@ import com.juriscore.billing.event.InvoiceCancelledEvent;
 import com.juriscore.billing.event.InvoiceCreatedEvent;
 import com.juriscore.billing.event.InvoiceIssuedEvent;
 import com.juriscore.billing.event.InvoiceOverdueEvent;
+import com.juriscore.billing.event.InvoiceEmailFailedEvent;
+import com.juriscore.billing.event.InvoiceEmailedEvent;
 import com.juriscore.billing.event.InvoicePdfDownloadedEvent;
 import com.juriscore.billing.event.InvoicePaidEvent;
 import com.juriscore.billing.event.PaymentRecordedEvent;
@@ -203,6 +205,15 @@ public class DomainEventAuditListener {
                             + e.getCurrency() + " outstanding");
             case InvoicePdfDownloadedEvent e -> new Entry("INVOICE", e.getInvoiceId(),
                     "Invoice " + e.getInvoiceNumber() + " PDF downloaded");
+            // Both outcomes are recorded. "Somebody tried at 14:05 and it did not go" is a
+            // different answer to "was this ever sent?" than silence, and only one of them
+            // is true. The reason code is the short token from EmailDeliveryException,
+            // never the provider's full response — see InvoiceEmailFailedEvent.
+            case InvoiceEmailedEvent e -> new Entry("INVOICE", e.getInvoiceId(),
+                    "Invoice " + e.getInvoiceNumber() + " emailed to " + e.getRecipient());
+            case InvoiceEmailFailedEvent e -> new Entry("INVOICE", e.getInvoiceId(),
+                    "Invoice " + e.getInvoiceNumber() + " could not be emailed to "
+                            + e.getRecipient() + " (" + e.getReasonCode() + ")");
 
             default -> null;
         };

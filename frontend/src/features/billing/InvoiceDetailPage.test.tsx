@@ -33,6 +33,7 @@ function invoice(overrides: Partial<Invoice> = {}): Invoice {
       taxAmount: '1800.00',
       sortOrder: 0,
     }],
+    emailStatus: 'NOT_SENT',
     createdAt: '2026-08-01T09:00:00Z',
     updatedAt: '2026-08-01T09:00:00Z',
     version: 3,
@@ -40,7 +41,7 @@ function invoice(overrides: Partial<Invoice> = {}): Invoice {
   };
 }
 
-function mount(role: Role, data: Invoice) {
+function mount(role: Role, data: Invoice, clientEmail: string | null = 'accounts@rao.test') {
   server.use(
     http.post('/api/v1/auth/refresh', () => HttpResponse.json(envelope({
       accessToken: 'access-1',
@@ -56,6 +57,7 @@ function mount(role: Role, data: Invoice) {
       id: data.clientId,
       displayName: 'Rao & Company',
       clientType: 'CORPORATE',
+      email: clientEmail,
       createdAt: '2026-01-01T00:00:00Z',
       updatedAt: '2026-01-01T00:00:00Z',
     }))),
@@ -268,5 +270,111 @@ describe('InvoiceDetailPage — PDF download', () => {
   it('is offered to every role that can read the invoice, including a read-only lawyer', async () => {
     mount('LAWYER', invoice({ status: 'ISSUED', issueDate: '2026-08-01', dueDate: '2026-08-31' }));
     expect(await screen.findByRole('button', { name: 'Download PDF' })).toBeInTheDocument();
+  });
+});
+
+describe('InvoiceDetailPage — emailing the client', () => {
+  const issued = () => invoice({
+    status: 'ISSUED', issueDate: '2026-08-01', dueDate: '2026-08-31',
+  });
+
+  it('sends the invoice to the address on the client record', async () => {
+    let posted = false;
+    mount('FIRM_ADMIN', issued());
+    server.use(http.post(`/api/v1/invoices/${INVOICE_ID}/email`, () => {
+      posted = true;
+      return HttpResponse.json(envelope({
+        invoiceNumber: 'INV-2026-0007',
+        recipient: 'accounts@rao.test',
+        sentAt: '2026-09-14T10:00:00Z',
+        fileName: 'invoice-INV-2026-0007.pdf',
+      }));
+    }));
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Email to client' }));
+
+    // The address is shown before anything is sent: it is the one fact the sender cannot
+    // otherwise check from this page.
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('accounts@rao.test')).toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(posted).toBe(true));
+    expect(await screen.findByText('Invoice emailed to accounts@rao.test')).toBeInTheDocument();
+  });
+
+  it('explains a client with no email instead of offering a send that would fail', async () => {
+    mount('FIRM_ADMIN', issued(), null);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Email to client' }));
+    const dialog = await screen.findByRole('dialog');
+
+    expect(within(dialog).getByText('This client has no email address')).toBeInTheDocument();
+    // No handler for POST /email exists, so a request would fail the suite.
+    expect(within(dialog).getByRole('button', { name: 'Send' })).toBeDisabled();
+  });
+
+  it('reports a provider failure and never claims the invoice went out', async () => {
+    mount('FIRM_ADMIN', issued());
+    server.use(http.post(`/api/v1/invoices/${INVOICE_ID}/email`, () =>
+      HttpResponse.json({
+        success: false,
+        error: {
+          code: 'EMAIL_DELIVERY_FAILED',
+          message: 'The invoice could not be emailed. It has not been sent.',
+          timestamp: '2026-09-14T10:00:00Z',
+        },
+      }, { status: 502 })));
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Email to client' }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+
+    expect(await screen.findByText(/could not be emailed/)).toBeInTheDocument();
+    expect(screen.queryByText(/Invoice emailed to/)).not.toBeInTheDocument();
+  });
+
+  it.each(['CLERK', 'LAWYER'] as Role[])(
+    'is not offered to a %s — sending a bill is the administrator\'s alone',
+    async (role) => {
+      mount(role, issued());
+
+      await screen.findByRole('heading', { name: 'INV-2026-0007' });
+      expect(screen.queryByRole('button', { name: 'Email to client' })).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(['DRAFT', 'CANCELLED'] as InvoiceStatus[])(
+    'is not offered on a %s invoice',
+    async (status) => {
+      // A draft has not been issued to anybody; a cancelled invoice has been withdrawn.
+      mount('FIRM_ADMIN', invoice({ status }));
+
+      await screen.findByRole('heading', { name: 'INV-2026-0007' });
+      expect(screen.queryByRole('button', { name: 'Email to client' })).not.toBeInTheDocument();
+    },
+  );
+
+  it('shows where and when the invoice was last emailed', async () => {
+    mount('FIRM_ADMIN', invoice({
+      status: 'ISSUED',
+      emailStatus: 'SENT',
+      emailRecipient: 'accounts@rao.test',
+      emailLastAttemptAt: '2026-09-14T10:00:00Z',
+    }));
+
+    expect(await screen.findByText(/accounts@rao.test/)).toBeInTheDocument();
+  });
+
+  it('shows a failed attempt as failed rather than as nothing', async () => {
+    mount('FIRM_ADMIN', invoice({
+      status: 'ISSUED',
+      emailStatus: 'FAILED',
+      emailRecipient: 'accounts@rao.test',
+      emailLastAttemptAt: '2026-09-14T10:00:00Z',
+    }));
+
+    expect(await screen.findByText(/Last attempt failed/)).toBeInTheDocument();
   });
 });

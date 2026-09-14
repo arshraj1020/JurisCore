@@ -2,6 +2,7 @@ package com.juriscore.billing.api;
 
 import com.juriscore.billing.api.dto.CancelInvoiceRequest;
 import com.juriscore.billing.api.dto.CreateInvoiceRequest;
+import com.juriscore.billing.api.dto.InvoiceEmailResponse;
 import com.juriscore.billing.api.dto.InvoiceResponse;
 import com.juriscore.billing.api.dto.IssueInvoiceRequest;
 import com.juriscore.billing.api.dto.PaymentResponse;
@@ -9,6 +10,7 @@ import com.juriscore.billing.api.dto.RecordPaymentRequest;
 import com.juriscore.billing.api.dto.UpdateInvoiceRequest;
 import com.juriscore.billing.domain.Invoice;
 import com.juriscore.billing.domain.InvoiceStatus;
+import com.juriscore.billing.service.InvoiceEmailService;
 import com.juriscore.billing.service.InvoicePdfService;
 import com.juriscore.billing.service.InvoiceService;
 import com.juriscore.billing.service.PaymentService;
@@ -67,6 +69,7 @@ public class InvoiceController {
     private final InvoiceService invoiceService;
     private final PaymentService paymentService;
     private final InvoicePdfService invoicePdfService;
+    private final InvoiceEmailService invoiceEmailService;
 
     @PostMapping("/api/v1/invoices")
     @ResponseStatus(HttpStatus.CREATED)
@@ -162,6 +165,23 @@ public class InvoiceController {
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "attachment; filename=\"" + rendered.fileName() + "\"")
                 .body(rendered.bytes());
+    }
+
+    @PostMapping("/api/v1/invoices/{invoiceId}/email")
+    @PreAuthorize("hasRole('FIRM_ADMIN')")
+    @Operation(summary = "Email this invoice to the client",
+            description = "Sends the same PDF the download endpoint produces, attached to a "
+                    + "note from the firm, to the address on the client's record. The "
+                    + "administrator's alone, like issuing: this is the moment a bill "
+                    + "actually reaches a client. A draft or a cancelled invoice is refused "
+                    + "with 409, a client with no address on file with 400, and a provider "
+                    + "that will not take the message with 502 — in which case nothing is "
+                    + "recorded as sent.")
+    public ApiResponse<InvoiceEmailResponse> email(@PathVariable UUID invoiceId) {
+        UUID organizationId = CurrentUser.requireOrganizationId();
+        return ApiResponse.ok(
+                InvoiceEmailResponse.from(invoiceEmailService.email(invoiceId, organizationId)),
+                "Invoice emailed successfully");
     }
 
     @GetMapping("/api/v1/invoices/{invoiceId}/payments")

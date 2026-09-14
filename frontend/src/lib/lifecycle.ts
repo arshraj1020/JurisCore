@@ -77,6 +77,16 @@ export const canCancelInvoice = (status: InvoiceStatus) =>
 export const canRecordPayment = (status: InvoiceStatus) =>
   status === 'ISSUED' || status === 'PARTIALLY_PAID' || status === 'OVERDUE';
 
+/**
+ * Whether a copy may be emailed to the client — `InvoiceStatus.canBeEmailed` on the server.
+ *
+ * A draft has not been issued to anybody and its figures can still change; a cancelled
+ * invoice has been withdrawn. PAID is included: a settled invoice is still the document a
+ * client asks for at year end.
+ */
+export const canEmailInvoice = (status: InvoiceStatus) =>
+  status !== 'DRAFT' && status !== 'CANCELLED';
+
 /** Whether an invoice still has an outstanding balance worth showing as due. */
 export const hasOutstanding = (status: InvoiceStatus) =>
   status !== 'PAID' && status !== 'CANCELLED' && status !== 'DRAFT';

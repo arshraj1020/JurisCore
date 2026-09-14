@@ -92,6 +92,22 @@ public class Invoice extends TenantAwareEntity {
     private Instant cancelledAt;
 
     /**
+     * Delivery state, on its own axis from {@link #status} — see {@link InvoiceEmailStatus}.
+     * The three fields below move together through {@link #recordEmailAttempt} and the
+     * database asserts the same pairing in {@code ck_invoices_email_attempt}.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "email_status", nullable = false, length = 32)
+    private InvoiceEmailStatus emailStatus = InvoiceEmailStatus.NOT_SENT;
+
+    /** The address the last attempt was addressed to, as it was at that moment. */
+    @Column(name = "email_recipient", length = 255)
+    private String emailRecipient;
+
+    @Column(name = "email_last_attempt_at")
+    private Instant emailLastAttemptAt;
+
+    /**
      * Ordered, cascading and orphan-removing, because replacing a draft's lines is one
      * operation on the invoice rather than a separate repository the service has to
      * remember to clean up after.
@@ -117,6 +133,25 @@ public class Invoice extends TenantAwareEntity {
      * in {@code ck_invoices_paid_at} and {@code ck_invoices_cancelled_at}, so a mistake
      * here is a failed write rather than a row that contradicts itself.
      */
+    /**
+     * Records the outcome of one attempt to email this invoice.
+     *
+     * <p>On the entity for the reason {@link #transitionTo} is: the three delivery fields
+     * are one fact, and a caller that set the status without the timestamp — or wrote a
+     * recipient onto an invoice nobody had tried to email — would produce a row that
+     * contradicts itself. {@code ck_invoices_email_attempt} refuses such a row, so a
+     * mistake here is a failed write rather than a lie in the database.
+     */
+    public void recordEmailAttempt(InvoiceEmailStatus outcome, String recipient, Instant when) {
+        if (outcome == null || outcome == InvoiceEmailStatus.NOT_SENT) {
+            throw new IllegalArgumentException(
+                    "An attempt ends in SENT or FAILED; NOT_SENT is the absence of one");
+        }
+        this.emailStatus = outcome;
+        this.emailRecipient = recipient;
+        this.emailLastAttemptAt = when;
+    }
+
     public void transitionTo(InvoiceStatus target, Instant when) {
         InvoiceStatusPolicy.requireTransition(this.status, target);
         this.status = target;

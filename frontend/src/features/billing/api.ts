@@ -1,8 +1,8 @@
 import { api, downloadFile } from '@/lib/api/client';
 import type {
   BillingProfile, CancelInvoiceRequest, CreateInvoiceRequest, Invoice, IssueInvoiceRequest,
-  PageResponse, Payment, RecordPaymentRequest, UpdateBillingProfileRequest,
-  UpdateInvoiceRequest,
+  InvoiceEmailSent, PageResponse, Payment, RecordPaymentRequest,
+  UpdateBillingProfileRequest, UpdateInvoiceRequest,
 } from '@/types/api';
 
 export interface InvoiceListParams {
@@ -31,6 +31,12 @@ export const invoicesApi = {
    */
   downloadPdf: (invoiceId: string, invoiceNumber: string) =>
     downloadFile(`/api/v1/invoices/${invoiceId}/pdf`, `invoice-${invoiceNumber}.pdf`),
+  /**
+   * Sends the same PDF to the address on the client's record. No body: the recipient is
+   * the client the invoice bills, and the server will not accept one from here.
+   */
+  email: (invoiceId: string) =>
+    api.post<InvoiceEmailSent>(`/api/v1/invoices/${invoiceId}/email`),
 };
 
 export const billingProfileApi = {

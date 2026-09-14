@@ -206,6 +206,21 @@ juriscore:
     upload-url-expiry: ${JURISCORE_S3_UPLOAD_URL_EXPIRY:15m}
     download-url-expiry: ${JURISCORE_S3_DOWNLOAD_URL_EXPIRY:5m}
 
+  email:
+    # "ses" (default) or "recording" — a no-network stand-in that captures messages and
+    # delivers nothing, used by the test profile and by a checkout with no AWS account.
+    # See RecordingEmailSender, which shouts at WARN so it can never be mistaken for the
+    # real thing in a deployment.
+    provider: ${JURISCORE_EMAIL_PROVIDER:ses}
+    # The mailbox SES sends from, and it must be an identity verified in SES. No default,
+    # for the reason the legal-research API key has none: unset does not stop the
+    # application starting, it only refuses invoice email until somebody sets it.
+    #
+    # This is NOT the address a client sees as the sender's name — that is the firm's, and
+    # the firm's own billing mailbox goes in the reply-to header, so replies reach the firm
+    # rather than this platform. See EmailMessage.
+    from-address: ${JURISCORE_EMAIL_FROM:}
+
   legal-research:
     embedding:
       # Config is descriptive, not authoritative: the pgvector column is fixed at
