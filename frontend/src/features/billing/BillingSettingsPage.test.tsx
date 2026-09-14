@@ -36,6 +36,7 @@ const PROFILE: BillingProfile = {
   defaultCurrency: 'INR',
   invoicePrefix: 'INV',
   invoiceNotes: 'Payable within 30 days.',
+  logoUrl: 'https://cdn.sharma-legal.test/logo.png',
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
   version: 3,
@@ -45,7 +46,7 @@ const PROFILE: BillingProfile = {
 const REPLACED_FIELDS = [
   'legalName', 'taxRegistration', 'billingEmail', 'billingPhone',
   'addressLine1', 'addressLine2', 'city', 'state', 'country', 'postalCode',
-  'invoiceNotes', 'defaultCurrency', 'invoicePrefix',
+  'invoiceNotes', 'defaultCurrency', 'invoicePrefix', 'logoUrl',
 ] as const;
 
 function mount() {

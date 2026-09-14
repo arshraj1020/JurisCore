@@ -30,6 +30,7 @@ public record BillingProfileResponse(
         String defaultCurrency,
         String invoicePrefix,
         String invoiceNotes,
+        String logoUrl,
         Instant createdAt,
         Instant updatedAt,
         Long version) {
@@ -50,6 +51,7 @@ public record BillingProfileResponse(
                 profile.getDefaultCurrency(),
                 profile.getInvoicePrefix(),
                 profile.getInvoiceNotes(),
+                profile.getLogoUrl(),
                 profile.getCreatedAt(),
                 profile.getUpdatedAt(),
                 profile.getId() == null ? null : profile.getVersion());

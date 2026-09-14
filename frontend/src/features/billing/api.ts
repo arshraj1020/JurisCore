@@ -1,4 +1,4 @@
-import { api } from '@/lib/api/client';
+import { api, downloadFile } from '@/lib/api/client';
 import type {
   BillingProfile, CancelInvoiceRequest, CreateInvoiceRequest, Invoice, IssueInvoiceRequest,
   PageResponse, Payment, RecordPaymentRequest, UpdateBillingProfileRequest,
@@ -24,6 +24,13 @@ export const invoicesApi = {
     api.get<PageResponse<Payment>>(`/api/v1/invoices/${invoiceId}/payments`, { page, size: 20 }),
   recordPayment: (invoiceId: string, body: RecordPaymentRequest) =>
     api.post<Payment>(`/api/v1/invoices/${invoiceId}/payments`, body),
+  /**
+   * Rendered fresh by the server on every call, in the firm's own identity — see
+   * `InvoicePdfService`. The fallback name is only used if the response somehow arrives
+   * without a `Content-Disposition` header; the server always sends one.
+   */
+  downloadPdf: (invoiceId: string, invoiceNumber: string) =>
+    downloadFile(`/api/v1/invoices/${invoiceId}/pdf`, `invoice-${invoiceNumber}.pdf`),
 };
 
 export const billingProfileApi = {

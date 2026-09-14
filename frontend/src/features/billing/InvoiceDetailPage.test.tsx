@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { HttpResponse, http } from 'msw';
@@ -238,5 +238,35 @@ describe('InvoiceDetailPage — the backend decimal contract', () => {
     expect(screen.getByText('Conference')).toBeInTheDocument();
     // Unit price and line amount are both ₹0.50 on that line, hence getAll.
     expect(screen.getAllByText('₹0.50').length).toBeGreaterThan(0);
+  });
+});
+
+describe('InvoiceDetailPage — PDF download', () => {
+  it('downloads the invoice as a PDF, in the firm\'s own identity', async () => {
+    URL.createObjectURL = vi.fn(() => 'blob:mock-invoice-pdf');
+    URL.revokeObjectURL = vi.fn();
+
+    let requested = false;
+    server.use(http.get(`/api/v1/invoices/${INVOICE_ID}/pdf`, () => {
+      requested = true;
+      return new HttpResponse(new Blob(['%PDF-1.4 fake'], { type: 'application/pdf' }), {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': 'attachment; filename="invoice-INV-2026-0007.pdf"',
+        },
+      });
+    }));
+
+    mount('FIRM_ADMIN', invoice({ status: 'ISSUED', issueDate: '2026-08-01', dueDate: '2026-08-31' }));
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Download PDF' }));
+
+    await waitFor(() => expect(requested).toBe(true));
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled());
+  });
+
+  it('is offered to every role that can read the invoice, including a read-only lawyer', async () => {
+    mount('LAWYER', invoice({ status: 'ISSUED', issueDate: '2026-08-01', dueDate: '2026-08-31' }));
+    expect(await screen.findByRole('button', { name: 'Download PDF' })).toBeInTheDocument();
   });
 });

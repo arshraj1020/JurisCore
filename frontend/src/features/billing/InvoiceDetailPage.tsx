@@ -63,6 +63,19 @@ export function InvoiceDetailPage() {
     await queryClient.invalidateQueries({ queryKey: keys.invoices.all });
   };
 
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const downloadPdf = async () => {
+    if (!query.data) return;
+    setDownloadingPdf(true);
+    try {
+      await invoicesApi.downloadPdf(query.data.id, query.data.invoiceNumber);
+    } catch (error) {
+      toast.error(messageFor(error));
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   if (query.error) {
     return (
       <>
@@ -90,6 +103,12 @@ export function InvoiceDetailPage() {
         ]}
         actions={invoice && (
           <>
+            <Button
+              variant="secondary" icon="download" loading={downloadingPdf}
+              onClick={() => void downloadPdf()}
+            >
+              Download PDF
+            </Button>
             {mayDraft && isInvoiceEditable(invoice.status) && (
               <Button variant="secondary" icon="edit" onClick={() => setDialog('edit')}>
                 Edit draft

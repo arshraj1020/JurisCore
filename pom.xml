@@ -83,6 +83,9 @@
         <maven-enforcer-plugin.version>3.4.1</maven-enforcer-plugin.version>
         <!-- Apache Tika: judgment text extraction (juriscore-legal-research). -->
         <tika.version>2.9.2</tika.version>
+        <!-- OpenHTMLtoPDF: renders the invoice PDF (juriscore-billing) from a plain
+             HTML/CSS template. Deterministic, no headless browser, no binary to ship. -->
+        <openhtmltopdf.version>1.0.10</openhtmltopdf.version>
     </properties>
 
     <dependencyManagement>
@@ -128,6 +131,12 @@
                 <groupId>org.apache.tika</groupId>
                 <artifactId>tika-parsers-standard-package</artifactId>
                 <version>${tika.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.openhtmltopdf</groupId>
+                <artifactId>openhtmltopdf-pdfbox</artifactId>
+                <version>${openhtmltopdf.version}</version>
             </dependency>
 
             <!-- Internal modules -->

@@ -66,6 +66,7 @@ public class BillingProfileService {
         profile.setCountry(trim(request.country()));
         profile.setPostalCode(trim(request.postalCode()));
         profile.setInvoiceNotes(trim(request.invoiceNotes()));
+        profile.setLogoUrl(trim(request.logoUrl()));
 
         if (request.defaultCurrency() != null && !request.defaultCurrency().isBlank()) {
             profile.setDefaultCurrency(CurrencyCodes.require(request.defaultCurrency()));

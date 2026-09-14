@@ -253,3 +253,52 @@ export function uploadToPresignedUrl(
     xhr.send(file);
   });
 }
+
+// ------------------------------------------------------------------ file downloads
+
+/**
+ * Downloads a file that JurisCore itself generates on demand — an invoice PDF, for
+ * instance — as opposed to {@link uploadToPresignedUrl}'s object-storage traffic.
+ *
+ * Deliberately not `api.get`: the response body here is a PDF, not the `{ success, data }`
+ * envelope every JSON endpoint returns, so it goes through the same authenticated
+ * `fetch`-plus-refresh path as {@link request} without the JSON unwrap at the end. The
+ * filename comes from the server's `Content-Disposition` header, so the saved file is
+ * named the way the invoice is (`invoice-INV-2026-000001.pdf`), not by a name this file
+ * would have to invent and keep in sync.
+ */
+export async function downloadFile(path: string, fallbackFileName: string): Promise<void> {
+  let response = await send(path, { method: 'GET' }, getAccessToken());
+
+  if (response.status === 401) {
+    const token = await refreshAccessToken();
+    if (!token) {
+      endSession();
+      throw new ApiError({
+        status: 401,
+        code: 'SESSION_EXPIRED',
+        message: 'Your session has ended. Please sign in again.',
+      });
+    }
+    response = await send(path, { method: 'GET' }, token);
+  }
+
+  if (!response.ok) throw await toApiError(response);
+
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') ?? '';
+  const match = /filename="([^"]+)"/.exec(disposition);
+  const fileName = match?.[1] ?? fallbackFileName;
+
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

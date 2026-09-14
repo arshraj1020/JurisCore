@@ -5,6 +5,7 @@ import com.juriscore.billing.event.InvoiceCancelledEvent;
 import com.juriscore.billing.event.InvoiceCreatedEvent;
 import com.juriscore.billing.event.InvoiceIssuedEvent;
 import com.juriscore.billing.event.InvoiceOverdueEvent;
+import com.juriscore.billing.event.InvoicePdfDownloadedEvent;
 import com.juriscore.billing.event.InvoicePaidEvent;
 import com.juriscore.billing.event.PaymentRecordedEvent;
 import com.juriscore.casemanagement.event.DeadlineCompletedEvent;
@@ -200,6 +201,8 @@ public class DomainEventAuditListener {
                     "Invoice " + e.getInvoiceNumber() + " passed its due date of "
                             + e.getDueDate() + " with " + e.getAmountDue() + " "
                             + e.getCurrency() + " outstanding");
+            case InvoicePdfDownloadedEvent e -> new Entry("INVOICE", e.getInvoiceId(),
+                    "Invoice " + e.getInvoiceNumber() + " PDF downloaded");
 
             default -> null;
         };
