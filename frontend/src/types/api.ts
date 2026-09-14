@@ -518,6 +518,7 @@ export interface BillingProfile {
   defaultCurrency: string;
   invoicePrefix: string;
   invoiceNotes?: string | null;
+  logoUrl?: string | null;
   createdAt?: IsoInstant | null;
   updatedAt?: IsoInstant | null;
   version?: number | null;
@@ -552,6 +553,7 @@ export interface UpdateBillingProfileRequest {
   country: string | null;
   postalCode: string | null;
   invoiceNotes: string | null;
+  logoUrl: string | null;
   defaultCurrency: string;
   invoicePrefix: string;
   /** The optimistic lock; null on the first save, when no profile row exists yet. */

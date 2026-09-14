@@ -9,6 +9,7 @@ import com.juriscore.billing.api.dto.RecordPaymentRequest;
 import com.juriscore.billing.api.dto.UpdateInvoiceRequest;
 import com.juriscore.billing.domain.Invoice;
 import com.juriscore.billing.domain.InvoiceStatus;
+import com.juriscore.billing.service.InvoicePdfService;
 import com.juriscore.billing.service.InvoiceService;
 import com.juriscore.billing.service.PaymentService;
 import com.juriscore.common.api.ApiResponse;
@@ -20,7 +21,10 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -62,6 +66,7 @@ public class InvoiceController {
 
     private final InvoiceService invoiceService;
     private final PaymentService paymentService;
+    private final InvoicePdfService invoicePdfService;
 
     @PostMapping("/api/v1/invoices")
     @ResponseStatus(HttpStatus.CREATED)
@@ -138,6 +143,25 @@ public class InvoiceController {
         return ApiResponse.ok(
                 view(invoiceService.cancel(invoiceId, organizationId, request), organizationId),
                 "Invoice cancelled successfully");
+    }
+
+    @GetMapping("/api/v1/invoices/{invoiceId}/pdf")
+    @PreAuthorize("hasAnyRole('FIRM_ADMIN', 'LAWYER', 'CLERK')")
+    @Operation(summary = "Download the invoice as a PDF",
+            description = "Rendered fresh on every call, in the firm's own identity — its "
+                    + "billing profile, never JurisCore's — from the invoice's current, "
+                    + "server-computed figures. Nothing is stored; the same invoice renders "
+                    + "the same document every time. Same authorization as reading the "
+                    + "invoice itself.")
+    public ResponseEntity<byte[]> downloadPdf(@PathVariable UUID invoiceId) {
+        UUID organizationId = CurrentUser.requireOrganizationId();
+        InvoicePdfService.RenderedInvoice rendered =
+                invoicePdfService.forDownload(invoiceId, organizationId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + rendered.fileName() + "\"")
+                .body(rendered.bytes());
     }
 
     @GetMapping("/api/v1/invoices/{invoiceId}/payments")

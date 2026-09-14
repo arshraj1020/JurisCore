@@ -14,7 +14,7 @@ import {
 import { ErrorState, TableSkeleton } from '@/components/ui/states';
 import { applyServerErrors } from '@/lib/api/formErrors';
 import { FormErrorSummary } from '@/components/ui/FormErrorSummary';
-import { LIMITS, currencyCode, invoicePrefix, optionalText } from '@/lib/validation';
+import { LIMITS, currencyCode, invoicePrefix, optionalText, optionalUrl } from '@/lib/validation';
 
 // Mirrors UpdateBillingProfileRequest. Three of these were wrong: legalName is 200 not
 // 255, billingPhone is 40 not 32, and invoicePrefix is a @Pattern allowing up to twelve
@@ -36,13 +36,14 @@ const schema = z.object({
   defaultCurrency: currencyCode,
   invoicePrefix,
   invoiceNotes: optionalText(LIMITS.NOTES),
+  logoUrl: optionalUrl,
 });
 type Values = z.infer<typeof schema>;
 
 const BLANK: Values = {
   legalName: '', taxRegistration: '', billingEmail: '', billingPhone: '',
   addressLine1: '', addressLine2: '', city: '', state: '', country: '', postalCode: '',
-  defaultCurrency: 'INR', invoicePrefix: 'INV', invoiceNotes: '',
+  defaultCurrency: 'INR', invoicePrefix: 'INV', invoiceNotes: '', logoUrl: '',
 };
 
 export function BillingSettingsPage() {
@@ -79,6 +80,7 @@ export function BillingSettingsPage() {
       defaultCurrency: profile.defaultCurrency,
       invoicePrefix: profile.invoicePrefix,
       invoiceNotes: profile.invoiceNotes ?? '',
+      logoUrl: profile.logoUrl ?? '',
     });
   }, [query.data, reset]);
 
@@ -97,6 +99,7 @@ export function BillingSettingsPage() {
       defaultCurrency: values.defaultCurrency.trim().toUpperCase(),
       invoicePrefix: values.invoicePrefix.trim().toUpperCase(),
       invoiceNotes: values.invoiceNotes.trim() || null,
+      logoUrl: values.logoUrl.trim() || null,
       // The optimistic lock, when the profile already exists.
       version: query.data?.version ?? null,
     }),
@@ -159,6 +162,15 @@ export function BillingSettingsPage() {
                     {...register('billingPhone')} />
                 )}
               </Field>
+              <div className="sm:col-span-2">
+                <Field label="Logo" error={errors.logoUrl?.message}
+                  hint="A link to an image you already host — printed at the top of invoice PDFs. Not an upload.">
+                  {({ id, describedBy, invalid }) => (
+                    <Input id={id} type="url" placeholder="https://" aria-describedby={describedBy}
+                      invalid={invalid} {...register('logoUrl')} />
+                  )}
+                </Field>
+              </div>
             </div>
           </Card>
 

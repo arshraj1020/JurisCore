@@ -34,5 +34,11 @@ public record UpdateBillingProfileRequest(
 
         @Size(max = 2000)
         @Schema(description = "Boilerplate copied onto new invoices — payment terms, for instance.")
-        String invoiceNotes) {
+        String invoiceNotes,
+
+        @Size(max = 500)
+        @Schema(description = "A URL to an image the firm already hosts, printed at the top of "
+                + "its invoice PDFs. Not an upload endpoint — paste a link to an image hosted "
+                + "elsewhere.")
+        String logoUrl) {
 }

@@ -31,6 +31,27 @@
             <groupId>com.juriscore</groupId>
             <artifactId>juriscore-casework</artifactId>
         </dependency>
+
+        <!--
+            Explicit, though juriscore-organization already arrives transitively through
+            casework -> identity -> organization: InvoicePdfService reads Organization
+            directly, as the fallback for whatever a firm has not filled in on its own
+            BillingProfile (name, contact email/phone, postal address), so an invoice PDF
+            never has a blank where its issuer's identity should be. Declared here rather
+            than left implicit, matching the rule the comment above already follows for
+            casework.
+        -->
+        <dependency>
+            <groupId>com.juriscore</groupId>
+            <artifactId>juriscore-organization</artifactId>
+        </dependency>
+
+        <!-- Renders the invoice PDF from a server-built HTML/CSS template. See
+             InvoicePdfService and InvoiceHtmlTemplate. -->
+        <dependency>
+            <groupId>com.openhtmltopdf</groupId>
+            <artifactId>openhtmltopdf-pdfbox</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

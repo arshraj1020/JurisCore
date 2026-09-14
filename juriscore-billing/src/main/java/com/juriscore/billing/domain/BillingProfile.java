@@ -77,4 +77,13 @@ public class BillingProfile extends TenantAwareEntity {
     /** Boilerplate copied onto new invoices — payment terms, bank details a firm prints. */
     @Column(name = "invoice_notes", length = 2000)
     private String invoiceNotes;
+
+    /**
+     * A URL to an image the firm already hosts, printed at the top of its invoice PDFs.
+     * Not an upload: JurisCore has no image-hosting concern anywhere else in the
+     * product, and a firm without one prints without a logo rather than with a broken
+     * image. See {@code InvoicePdfService}.
+     */
+    @Column(name = "logo_url", length = 500)
+    private String logoUrl;
 }
