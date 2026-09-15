@@ -52,7 +52,7 @@ class MimeEmailAssemblerTest {
 
         InternetAddress from = (InternetAddress) parsed.getFrom()[0];
         assertThat(from.getAddress()).isEqualTo(FROM);
-        assertThat(from.getPersonal()).isEqualTo("Sharma & Associates LLP");
+        assertThat(from.getPersonal()).isEqualTo("Sharma & Associates LLP via juriscore.test");
 
         InternetAddress to = (InternetAddress) parsed.getRecipients(Message.RecipientType.TO)[0];
         assertThat(to.getAddress()).isEqualTo("asha@menon.test");
@@ -98,7 +98,8 @@ class MimeEmailAssemblerTest {
 
         MimeMessage parsed = parse(MimeEmailAssembler.assemble(message, FROM));
 
-        assertThat(((InternetAddress) parsed.getFrom()[0]).getPersonal()).isEqualTo("Nguyễn & Associés");
+        assertThat(((InternetAddress) parsed.getFrom()[0]).getPersonal())
+                .isEqualTo("Nguyễn & Associés via juriscore.test");
         assertThat(((InternetAddress) parsed.getRecipients(Message.RecipientType.TO)[0])
                 .getPersonal()).isEqualTo("Trần Minh");
         assertThat(parsed.getSubject()).isEqualTo("Hóa đơn INV-2026-000001");
@@ -122,6 +123,61 @@ class MimeEmailAssemblerTest {
         // Jakarta Mail answers the From address when no Reply-To header is present, which
         // is the RFC's rule and the behaviour a mail client implements.
         assertThat(((InternetAddress) parsed.getReplyTo()[0]).getAddress()).isEqualTo(FROM);
+    }
+
+    @Test
+    @DisplayName("a firm cannot pass itself off as somebody else's mailbox")
+    void neutralisesADisplayNameThatImitatesAnAddress() throws Exception {
+        // legalName is tenant-supplied and every firm sends from the same verified mailbox,
+        // so without this a firm could send DKIM-signed mail from this domain that reads as
+        // if it came from a bank.
+        EmailMessage message = new EmailMessage("HDFC Bank Ltd <support@hdfcbank.example>",
+                null, "asha@menon.test", "Asha Menon", "Invoice", "Dear Asha,\n", null);
+
+        InternetAddress from = (InternetAddress) parse(
+                MimeEmailAssembler.assemble(message, FROM)).getFrom()[0];
+
+        assertThat(from.getAddress()).isEqualTo(FROM);
+        assertThat(from.getPersonal()).isEqualTo("HDFC Bank Ltd support hdfcbank.example via juriscore.test");
+        assertThat(from.getPersonal()).doesNotContain("@", "<", ">");
+    }
+
+    @Test
+    @DisplayName("a newline in a firm name cannot split the header")
+    void refusesHeaderInjectionThroughTheDisplayName() throws Exception {
+        EmailMessage message = new EmailMessage("Sharma\r\nBcc: everyone@example.test", null,
+                "asha@menon.test", "Asha Menon", "Invoice", "Dear Asha,\n", null);
+
+        MimeMessage parsed = parse(MimeEmailAssembler.assemble(message, FROM));
+
+        assertThat(parsed.getHeader("Bcc")).isNull();
+        assertThat(((InternetAddress) parsed.getFrom()[0]).getPersonal())
+                .isEqualTo("Sharma Bcc: everyone example.test via juriscore.test");
+    }
+
+    @Test
+    void capsARidiculouslyLongFirmName() throws Exception {
+        EmailMessage message = new EmailMessage("A".repeat(200), null, "asha@menon.test",
+                "Asha Menon", "Invoice", "Dear Asha,\n", null);
+
+        String personal = ((InternetAddress) parse(MimeEmailAssembler.assemble(message, FROM))
+                .getFrom()[0]).getPersonal();
+
+        assertThat(personal).isEqualTo("A".repeat(78) + " via juriscore.test");
+    }
+
+    @Test
+    @DisplayName("replies still carry the firm's own name, unqualified")
+    void doesNotQualifyTheReplyToName() throws Exception {
+        EmailMessage message = new EmailMessage("Sharma & Associates LLP",
+                "accounts@sharma-legal.test", "asha@menon.test", "Asha Menon", "Invoice",
+                "Dear Asha,\n", null);
+
+        InternetAddress replyTo = (InternetAddress) parse(
+                MimeEmailAssembler.assemble(message, FROM)).getReplyTo()[0];
+
+        assertThat(replyTo.getAddress()).isEqualTo("accounts@sharma-legal.test");
+        assertThat(replyTo.getPersonal()).isEqualTo("Sharma & Associates LLP");
     }
 
     private EmailAttachment pdf() {
