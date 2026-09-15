@@ -15,7 +15,7 @@ export type IconName =
   | 'bell' | 'people' | 'audit' | 'menu' | 'close' | 'chevronRight' | 'chevronDown'
   | 'search' | 'plus' | 'upload' | 'download' | 'document' | 'trash' | 'edit' | 'check'
   | 'alert' | 'info' | 'warning' | 'clock' | 'calendar' | 'money' | 'logout' | 'user'
-  | 'filter' | 'external' | 'refresh' | 'eye' | 'eyeOff' | 'scales';
+  | 'filter' | 'external' | 'refresh' | 'eye' | 'eyeOff' | 'scales' | 'mail';
 
 const PATHS: Record<IconName, JSX.Element> = {
   dashboard: <path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z" />,
@@ -36,6 +36,7 @@ const PATHS: Record<IconName, JSX.Element> = {
   plus: <path d="M12 5v14M5 12h14" />,
   upload: <path d="M12 16V4m0 0L8 8m4-4 4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />,
   download: <path d="M12 4v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />,
+  mail: <path d="M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm-.6.4 8.6 6.6 8.6-6.6" />,
   document: <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-5-5 5 5m-5-5v5h5" />,
   trash: <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m3 0v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7m4 4v6m4-6v6" />,
   edit: <path d="M4 20h4L20 8l-4-4L4 16v4Zm11-15 4 4" />,

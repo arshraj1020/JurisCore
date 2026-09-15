@@ -74,8 +74,12 @@ public class InvoicePdfService {
     private final CaseAccess caseAccess;
     private final EventPublisher eventPublisher;
 
-    /** What a caller downloading an invoice's PDF gets back. */
-    public record RenderedInvoice(byte[] bytes, String fileName) {
+    /**
+     * A rendered invoice: the bytes, the filename to save them under, and enough identity
+     * for a caller to raise an event about what it then did with them.
+     */
+    public record RenderedInvoice(byte[] bytes, String fileName, UUID invoiceId,
+                                  String invoiceNumber, UUID clientId) {
     }
 
     /**
@@ -88,6 +92,28 @@ public class InvoicePdfService {
      */
     @Transactional(readOnly = true)
     public RenderedInvoice forDownload(UUID invoiceId, UUID organizationId) {
+        RenderedInvoice rendered = render(invoiceId, organizationId);
+
+        eventPublisher.publish(new InvoicePdfDownloadedEvent(organizationId,
+                rendered.invoiceId(), rendered.invoiceNumber(), rendered.clientId()));
+        return rendered;
+    }
+
+    /**
+     * The same document, without recording a download.
+     *
+     * <p>Split out for {@code InvoiceEmailService}: attaching an invoice to an email is
+     * not a download, and reusing {@link #forDownload} for it would write an audit row
+     * saying somebody fetched a copy when nobody did. Emailing raises its own event, so
+     * the trail stays an accurate account of what actually happened rather than of which
+     * method the code happened to call.
+     *
+     * <p>Transactional and read-only like its caller above: the line items are lazy and
+     * {@code open-in-view} is off, so the rendering has to happen while this transaction
+     * is still open.
+     */
+    @Transactional(readOnly = true)
+    public RenderedInvoice render(UUID invoiceId, UUID organizationId) {
         Invoice invoice = invoiceService.require(invoiceId, organizationId);
         BillingProfile profile = billingProfileService.forOrganization(organizationId);
         Organization organization = organizationService.getById(organizationId);
@@ -98,13 +124,11 @@ public class InvoicePdfService {
         BigDecimal amountPaid = invoiceService.amountPaid(invoiceId, organizationId);
 
         byte[] pdf = render(invoice, profile, organization, client, legalCase, amountPaid);
-
-        eventPublisher.publish(new InvoicePdfDownloadedEvent(organizationId, invoice.getId(),
-                invoice.getInvoiceNumber(), invoice.getClientId()));
         log.info("Invoice {} PDF rendered ({} bytes) for organization {}",
                 invoice.getInvoiceNumber(), pdf.length, organizationId);
 
-        return new RenderedInvoice(pdf, fileName(invoice));
+        return new RenderedInvoice(pdf, fileName(invoice), invoice.getId(),
+                invoice.getInvoiceNumber(), invoice.getClientId());
     }
 
     // -------------------------------------------------------------------------- rendering

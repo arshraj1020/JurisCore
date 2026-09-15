@@ -8,7 +8,8 @@ import { keys } from '@/lib/api/queryKeys';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { can } from '@/lib/auth/roles';
 import {
-  canCancelInvoice, canIssueInvoice, canRecordPayment, hasOutstanding, isInvoiceEditable,
+  canCancelInvoice, canEmailInvoice, canIssueInvoice, canRecordPayment, hasOutstanding,
+  isInvoiceEditable,
 } from '@/lib/lifecycle';
 import { useToast } from '@/components/ui/Toast';
 import { PageHeader } from '@/components/ui/PageHeader';
@@ -23,7 +24,7 @@ import { InvoiceStatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate, formatDateTime, formatMoney, formatPercent, formatQuantity, humanise } from '@/lib/format';
 import { parseDecimal } from '@/lib/money';
 import { messageFor } from '@/lib/api/errors';
-import type { Invoice, PaymentMethod } from '@/types/api';
+import type { Client, Invoice, PaymentMethod } from '@/types/api';
 
 const METHODS: PaymentMethod[] = ['BANK_TRANSFER', 'UPI', 'CARD', 'CHEQUE', 'CASH', 'OTHER'];
 
@@ -33,7 +34,8 @@ export function InvoiceDetailPage() {
   const toast = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [dialog, setDialog] = useState<'edit' | 'issue' | 'cancel' | 'payment' | null>(null);
+  const [dialog, setDialog] =
+    useState<'edit' | 'issue' | 'cancel' | 'payment' | 'email' | null>(null);
 
   const query = useQuery({
     queryKey: keys.invoices.detail(invoiceId),
@@ -109,6 +111,11 @@ export function InvoiceDetailPage() {
             >
               Download PDF
             </Button>
+            {mayAdminister && canEmailInvoice(invoice.status) && (
+              <Button variant="secondary" icon="mail" onClick={() => setDialog('email')}>
+                Email to client
+              </Button>
+            )}
             {mayDraft && isInvoiceEditable(invoice.status) && (
               <Button variant="secondary" icon="edit" onClick={() => setDialog('edit')}>
                 Edit draft
@@ -187,6 +194,21 @@ export function InvoiceDetailPage() {
               {invoice.cancelledAt && (
                 <Detail label="Cancelled">{formatDateTime(invoice.cancelledAt)}</Detail>
               )}
+              <Detail label="Emailed">
+                {invoice.emailStatus === 'SENT' ? (
+                  <span className="text-ink-700">
+                    {formatDateTime(invoice.emailLastAttemptAt)}
+                    {invoice.emailRecipient && <> to {invoice.emailRecipient}</>}
+                  </span>
+                ) : invoice.emailStatus === 'FAILED' ? (
+                  <Badge tone="danger">
+                    Last attempt failed{invoice.emailLastAttemptAt
+                      ? ` ${formatDateTime(invoice.emailLastAttemptAt)}` : ''}
+                  </Badge>
+                ) : (
+                  <span className="text-ink-500">Not sent</span>
+                )}
+              </Detail>
               {invoice.notes && (
                 <Detail label="Notes" className="sm:col-span-2 lg:col-span-3">
                   <span className="whitespace-pre-wrap text-ink-700">{invoice.notes}</span>
@@ -352,6 +374,18 @@ export function InvoiceDetailPage() {
             setDialog(null);
             toast.success('Invoice cancelled');
             navigate('/invoices');
+          }}
+        />
+      )}
+      {invoice && dialog === 'email' && (
+        <EmailDialog
+          invoice={invoice}
+          client={client.data}
+          onClose={() => setDialog(null)}
+          onSent={async (recipient) => {
+            await refresh();
+            setDialog(null);
+            toast.success(`Invoice emailed to ${recipient}`);
           }}
         />
       )}
@@ -678,6 +712,76 @@ function CancelDialog({ invoice, onClose, onCancelled }: {
             onChange={(event) => setReason(event.target.value)} />
         )}
       </Field>
+    </Dialog>
+  );
+}
+
+/**
+ * Sending a bill to a client is not an action to fire from a single click.
+ *
+ * It reaches somebody outside the firm and cannot be recalled, so it gets the same
+ * confirmation step issuing and cancelling get — and the step is doing real work here, not
+ * asking "are you sure": it shows the address the invoice is about to go to, which is the
+ * one fact the sender cannot otherwise check from this page.
+ *
+ * A client with no address on file is explained rather than left to fail. The server would
+ * answer 400, but a button that can only be refused is worse than a button that says why.
+ */
+function EmailDialog({ invoice, client, onClose, onSent }: {
+  invoice: Invoice;
+  client: Client | undefined;
+  onClose: () => void;
+  onSent: (recipient: string) => void | Promise<void>;
+}) {
+  const toast = useToast();
+  const recipient = client?.email?.trim() ?? '';
+
+  const send = useMutation({
+    mutationFn: () => invoicesApi.email(invoice.id),
+    onSuccess: (sent) => void onSent(sent.recipient),
+    onError: (error) => toast.error(messageFor(error)),
+  });
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Email this invoice"
+      description="The client receives the same PDF you can download, attached to a note from your firm."
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={send.isPending}>Cancel</Button>
+          <Button icon="mail" loading={send.isPending} disabled={!recipient}
+            onClick={() => send.mutate()}>
+            Send
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        {recipient ? (
+          <p className="text-sm text-ink-700">
+            Invoice <span className="font-mono">{invoice.invoiceNumber}</span> will be sent to{' '}
+            <span className="font-medium text-ink-900">{recipient}</span>.
+          </p>
+        ) : (
+          <Alert tone="warning" title="This client has no email address">
+            Add one to the client record before emailing their invoice.
+          </Alert>
+        )}
+        {invoice.emailStatus === 'SENT' && invoice.emailLastAttemptAt && (
+          <Alert tone="neutral" title="Already emailed">
+            This invoice was last emailed {formatDateTime(invoice.emailLastAttemptAt)}
+            {invoice.emailRecipient ? ` to ${invoice.emailRecipient}` : ''}. Sending again
+            delivers another copy.
+          </Alert>
+        )}
+        {invoice.emailStatus === 'FAILED' && (
+          <Alert tone="danger" title="The last attempt did not go">
+            Nothing was delivered. Sending again tries once more.
+          </Alert>
+        )}
+      </div>
     </Dialog>
   );
 }

@@ -424,6 +424,12 @@ export interface InvoiceLineItemRequest {
   taxRate?: string | null;
 }
 
+/**
+ * Whether a copy has reached the client's inbox — a separate axis from `InvoiceStatus`.
+ * A PAID invoice may never have been emailed; an ISSUED one may have been emailed twice.
+ */
+export type InvoiceEmailStatus = 'NOT_SENT' | 'SENT' | 'FAILED';
+
 export interface Invoice {
   id: string;
   invoiceNumber: string;
@@ -442,6 +448,10 @@ export interface Invoice {
   notes?: string | null;
   paidAt?: IsoInstant | null;
   cancelledAt?: IsoInstant | null;
+  emailStatus: InvoiceEmailStatus;
+  /** Where the last attempt was addressed. Absent until one has been made. */
+  emailRecipient?: string | null;
+  emailLastAttemptAt?: IsoInstant | null;
   /**
    * Absent on list responses: the backend omits line items from a page of invoices, so
    * `undefined` here means "not included", never "this invoice has none".
@@ -558,6 +568,21 @@ export interface UpdateBillingProfileRequest {
   invoicePrefix: string;
   /** The optimistic lock; null on the first save, when no profile row exists yet. */
   version: number | null;
+}
+
+/**
+ * What the server says about an invoice it has just emailed.
+ *
+ * Nothing about the provider: which service carries the message, and from which verified
+ * mailbox, is a deployment fact the browser neither needs nor is told.
+ */
+export interface InvoiceEmailSent {
+  invoiceNumber: string;
+  /** The client address it went to, so the sender can see it went where they expected. */
+  recipient: string;
+  /** When the provider accepted it. Acceptance, not proof of reading. */
+  sentAt: IsoInstant;
+  fileName: string;
 }
 
 // ----------------------------------------------------------- notifications

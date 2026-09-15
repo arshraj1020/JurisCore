@@ -54,7 +54,12 @@ public enum ErrorCode {
     RATE_LIMIT_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "Too many requests. Please slow down."),
 
     // 500
-    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong on our side");
+    INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong on our side"),
+
+    // 502 — a dependency we call out to refused or could not be reached. Distinct from
+    // INTERNAL_ERROR on purpose: nothing is wrong with this application, the message was
+    // simply not accepted, and the caller may sensibly try again.
+    EMAIL_DELIVERY_FAILED(HttpStatus.BAD_GATEWAY, "The email could not be delivered");
 
     private final HttpStatus status;
     private final String defaultMessage;

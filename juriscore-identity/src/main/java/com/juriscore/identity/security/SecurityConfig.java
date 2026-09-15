@@ -140,7 +140,18 @@ public class SecurityConfig {
                 .toList());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Request-Id"));
-        configuration.setExposedHeaders(List.of("X-Request-Id"));
+        /*
+         * Exposed, or the browser hides them from the page's own JavaScript. The frontend
+         * is served from a different origin to the API (Cloudflare Pages in front of
+         * Render), so a response header the SPA needs to read has to be named here or
+         * `fetch` simply reports it as absent.
+         *
+         * Content-Disposition is what carries an invoice PDF's filename. Without it the
+         * download in lib/api/client.ts silently falls back to a name it builds itself,
+         * which is a guess that happens to be right today and would stop being right the
+         * moment the server changes how it names a file.
+         */
+        configuration.setExposedHeaders(List.of("X-Request-Id", "Content-Disposition"));
         /*
          * Credentials are NOT allowed, because this API does not use any.
          *

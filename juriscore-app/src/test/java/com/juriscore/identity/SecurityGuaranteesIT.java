@@ -280,6 +280,46 @@ class SecurityGuaranteesIT extends AbstractIntegrationTest {
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.error.code").value("ILLEGAL_STATE_TRANSITION"));
         }
+
+        @Test
+        @DisplayName("nor by the last administrator demoting themselves")
+        void lastAdminCannotBeDemoted() throws Exception {
+            // The other way into the same dead end: a firm with no active administrator
+            // cannot invite anyone, issue an invoice, read its audit trail, or grant the
+            // role back, and no platform role can do it for them.
+            Firm firm = registerFirm("Sharma & Associates", "asha@sharma-legal.test");
+
+            mockMvc.perform(patch("/api/v1/users/" + firm.adminId() + "/role")
+                            .header("Authorization", bearer(firm.adminAccessToken()))
+                            .param("role", "CLERK"))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.error.code").value("ILLEGAL_STATE_TRANSITION"));
+
+            // Still an administrator, and still holding a working token.
+            mockMvc.perform(get("/api/v1/users/me")
+                            .header("Authorization", bearer(firm.adminAccessToken())))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.role").value("FIRM_ADMIN"));
+        }
+
+        @Test
+        @DisplayName("an administrator may step down once another one exists")
+        void anAdminCanBeDemotedWhenAnotherRemains() throws Exception {
+            Firm firm = registerFirm("Sharma & Associates", "asha@sharma-legal.test");
+            Member second = inviteAndActivate(firm, "ravi@sharma-legal.test", "FIRM_ADMIN");
+
+            mockMvc.perform(patch("/api/v1/users/" + firm.adminId() + "/role")
+                            .header("Authorization", bearer(firm.adminAccessToken()))
+                            .param("role", "CLERK"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.role").value("CLERK"));
+
+            // And the guard now protects the one who is left.
+            mockMvc.perform(patch("/api/v1/users/" + second.id() + "/role")
+                            .header("Authorization", bearer(second.accessToken()))
+                            .param("role", "LAWYER"))
+                    .andExpect(status().isConflict());
+        }
     }
 
     // ================================================================ tenant isolation

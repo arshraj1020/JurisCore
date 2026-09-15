@@ -13,6 +13,7 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sqs.SqsClient;
 
 import java.net.URI;
@@ -77,6 +78,30 @@ public class AwsConfig {
         }
         // Real AWS keeps the SDK default (virtual-host addressing), which is what S3
         // recommends and what path-style deprecation requires.
+        return builder.build();
+    }
+
+    /**
+     * SES v2, for the invoice email in Phase 7.
+     *
+     * <p>v2 rather than the original SES API because the invoice goes out as a raw MIME
+     * message — the simple content API cannot carry an attachment — and v2 is where that
+     * shape is current. Same credential chain and same LocalStack endpoint override as
+     * every other client here, so email needs no AWS configuration of its own beyond a
+     * verified from-address.
+     *
+     * <p>The bean exists only when {@code juriscore.aws.enabled} is true, like its
+     * siblings. {@code SesEmailSender} takes it through an {@code ObjectProvider} for
+     * exactly that reason: a checkout with AWS switched off must still start.
+     */
+    @Bean
+    public SesV2Client sesV2Client(AwsCredentialsProvider credentialsProvider) {
+        var builder = SesV2Client.builder()
+                .region(Region.of(properties.getRegion()))
+                .credentialsProvider(credentialsProvider);
+        if (usesLocalEndpoint()) {
+            builder.endpointOverride(URI.create(properties.getEndpoint()));
+        }
         return builder.build();
     }
 

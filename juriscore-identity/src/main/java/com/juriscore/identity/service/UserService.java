@@ -139,12 +139,31 @@ public class UserService {
         return user;
     }
 
+    /**
+     * Changes what a member may do.
+     *
+     * <p>The last-administrator guard is the same one {@link #changeStatus} applies, and it
+     * belongs here for the same reason: a firm with no active {@code FIRM_ADMIN} cannot
+     * issue an invoice, invite anyone, read its own audit trail, or grant the role back —
+     * and {@code SUPER_ADMIN} has no bootstrap path, so the only way out is somebody
+     * editing the database by hand. Demoting the last one is the other way to arrive at
+     * that state, and it was previously unguarded: an administrator could demote
+     * themselves and lock the firm out of its own account permanently.
+     */
     @Transactional
     public User changeRole(UUID organizationId, UUID userId, Role role) {
         if (role == Role.SUPER_ADMIN) {
             throw new ApiException(ErrorCode.ACCESS_DENIED, "Cannot grant platform administrator from a firm");
         }
         User user = getScoped(userId, organizationId);
+        if (user.getRole() == Role.FIRM_ADMIN && role != Role.FIRM_ADMIN
+                && user.getStatus() == UserStatus.ACTIVE
+                && userRepository.countByOrganizationIdAndRoleAndStatus(
+                        organizationId, Role.FIRM_ADMIN, UserStatus.ACTIVE) <= 1) {
+            throw new ApiException(ErrorCode.ILLEGAL_STATE_TRANSITION,
+                    "A firm must keep at least one active administrator. Promote another "
+                            + "member first, then change this role.");
+        }
         user.setRole(role);
         // The role is baked into issued access tokens, so old ones must stop validating.
         user.setTokenGeneration(user.getTokenGeneration() + 1);

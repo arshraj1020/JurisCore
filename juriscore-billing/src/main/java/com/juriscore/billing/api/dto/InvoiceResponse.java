@@ -1,6 +1,7 @@
 package com.juriscore.billing.api.dto;
 
 import com.juriscore.billing.domain.Invoice;
+import com.juriscore.billing.domain.InvoiceEmailStatus;
 import com.juriscore.billing.domain.InvoiceStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -42,6 +43,13 @@ public record InvoiceResponse(
         String notes,
         Instant paidAt,
         Instant cancelledAt,
+        @Schema(description = "Whether a copy has been emailed to the client. A separate "
+                + "axis from status: a PAID invoice may never have been sent.")
+        InvoiceEmailStatus emailStatus,
+        @Schema(description = "The address the last email attempt was addressed to.")
+        String emailRecipient,
+        @Schema(description = "When that attempt was made, successful or not.")
+        Instant emailLastAttemptAt,
         List<InvoiceLineItemResponse> lineItems,
         Instant createdAt,
         Instant updatedAt,
@@ -97,6 +105,9 @@ public record InvoiceResponse(
                 invoice.getNotes(),
                 invoice.getPaidAt(),
                 invoice.getCancelledAt(),
+                invoice.getEmailStatus(),
+                invoice.getEmailRecipient(),
+                invoice.getEmailLastAttemptAt(),
                 lines,
                 invoice.getCreatedAt(),
                 invoice.getUpdatedAt(),

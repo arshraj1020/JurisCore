@@ -87,6 +87,16 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>sqs</artifactId>
         </dependency>
+        <!-- Invoice email (Phase 7). Raw MIME send, so the PDF can travel as an attachment. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sesv2</artifactId>
+        </dependency>
+        <!-- Builds that MIME document. Transport unused; see MimeEmailAssembler. -->
+        <dependency>
+            <groupId>org.eclipse.angus</groupId>
+            <artifactId>angus-mail</artifactId>
+        </dependency>
 
         <!-- Integration tests run against real Postgres and Redis containers. -->
         <dependency>

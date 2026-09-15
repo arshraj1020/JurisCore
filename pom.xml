@@ -86,6 +86,18 @@
         <!-- OpenHTMLtoPDF: renders the invoice PDF (juriscore-billing) from a plain
              HTML/CSS template. Deterministic, no headless browser, no binary to ship. -->
         <openhtmltopdf.version>1.0.10</openhtmltopdf.version>
+        <!--
+            Angus Mail: the Jakarta Mail implementation, used by juriscore-app solely to
+            ASSEMBLE the MIME document SES sends as a raw message. Its SMTP transport is
+            never configured and never used — see MimeEmailAssembler on why MIME is not
+            something to hand-roll.
+
+            Pinned here rather than inherited, following the rule the versions above
+            already follow: every third-party coordinate in this build names its version in
+            one place. Spring Boot manages this artifact too, so a Boot upgrade will not
+            move it on its own.
+        -->
+        <angus-mail.version>2.0.3</angus-mail.version>
     </properties>
 
     <dependencyManagement>
@@ -137,6 +149,12 @@
                 <groupId>com.openhtmltopdf</groupId>
                 <artifactId>openhtmltopdf-pdfbox</artifactId>
                 <version>${openhtmltopdf.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.eclipse.angus</groupId>
+                <artifactId>angus-mail</artifactId>
+                <version>${angus-mail.version}</version>
             </dependency>
 
             <!-- Internal modules -->

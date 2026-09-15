@@ -37,4 +37,19 @@ public enum InvoiceStatus {
     public boolean isTerminal() {
         return this == PAID || this == CANCELLED;
     }
+
+    /**
+     * Whether a copy of an invoice in this state may be emailed to the client.
+     *
+     * <p>Not a DRAFT: it is a working document, nobody has been asked to pay it, and its
+     * figures can still change under the copy the client received. Not CANCELLED either —
+     * sending a withdrawn bill is the one outcome worse than sending none.
+     *
+     * <p>PAID is included on purpose. A settled invoice is still the document a client
+     * asks for at year end, and refusing to re-send it would be a rule with no reason
+     * behind it.
+     */
+    public boolean canBeEmailed() {
+        return this == ISSUED || this == PARTIALLY_PAID || this == OVERDUE || this == PAID;
+    }
 }
