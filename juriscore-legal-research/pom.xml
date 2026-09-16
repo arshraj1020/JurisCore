@@ -52,15 +52,63 @@
             <artifactId>postgresql</artifactId>
         </dependency>
 
-        <!-- Judgment text extraction. tika-parsers-standard-package brings the PDF/Office
-             parsers (PDFBox, POI) that tika-core alone does not. -->
+        <!--
+            Judgment text extraction.
+
+            tika-parsers-standard-package is NOT used here. It would pull in
+            tika-parser-pdf-module, which in turn pulls PDFBox 3.x. OpenHTMLtoPDF 1.0.10
+            (in juriscore-billing) requires PDFBox 2.x, and Maven resolves
+            org.apache.pdfbox:pdfbox to one version across the whole classpath. Having
+            both 2.x and 3.x in the effective tree would mean one of the two renderers
+            breaks at runtime.
+
+            The solution is two-part:
+              1. Use granular Tika 3.x parser modules that together cover every judgment
+                 format the application handles (Office/ODF, plain text/RTF/CSV,
+                 HTML/XHTML, images), but deliberately exclude tika-parser-pdf-module.
+              2. Handle PDF extraction in LegalDocumentTextExtractor directly via the
+                 PDFBox 2.x API (PDDocument + PDFTextStripper). PDFBox 2.0.31 is already
+                 on the classpath for invoice rendering, so this adds zero new JARs.
+
+            Format coverage by module:
+              tika-parser-microsoft-module → DOC/DOCX, XLS/XLSX, PPT/PPTX (Apache POI)
+              tika-parser-text-module      → plain text, RTF, CSV
+              tika-parser-html-module      → HTML/XHTML
+              tika-parser-image-module     → JPEG, PNG, TIFF and other image types
+              (PDF)                        → handled in LegalDocumentTextExtractor via PDFBox
+
+            NOTE: the artifact is tika-parser-microsoft-module, NOT tika-parser-office-module.
+            tika-parser-office-module does not exist on Maven Central. The Microsoft Office
+            parser has always been named tika-parser-microsoft-module in both the 2.x and 3.x
+            Tika release lines.
+        -->
         <dependency>
             <groupId>org.apache.tika</groupId>
             <artifactId>tika-core</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.tika</groupId>
-            <artifactId>tika-parsers-standard-package</artifactId>
+            <artifactId>tika-parser-microsoft-module</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parser-text-module</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parser-html-module</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parser-image-module</artifactId>
+        </dependency>
+        <!--
+            PDFBox 2.x: used directly for PDF text extraction (see comment above).
+            Version managed by root pom at 2.0.31 — no version here to avoid drift.
+        -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
         </dependency>
     </dependencies>
 
