@@ -4,10 +4,27 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
+    <!--
+        Spring Boot owns the versions of Tomcat, Netty, Jackson, Micrometer, Logback,
+        Hibernate, Flyway, Lettuce and Spring itself. Upgrading the parent is therefore the
+        correct — and the smallest — way to move all of them at once, rather than pinning
+        each one here and drifting out of step with what Boot actually tests together.
+
+        3.3.x was left behind because it is out of OSS support: its last community patch
+        was 3.3.13, so every CVE found in a dependency it manages stays unfixed on that
+        line no matter how many patch bumps are applied. Staying there would mean the same
+        Trivy failure again next month with no remedy available. 3.5.x is the newest line
+        that is still Boot 3 — no Jakarta or Jackson 3 migration, no Boot 4 — and is still
+        receiving security patches.
+
+        KEEP IN STEP with spring.boot.version below, and confirm the latest 3.5.x patch
+        before merging; this is the single property that moves most of the image's
+        dependency CVEs.
+    -->
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.5</version>
+        <version>3.5.14</version>
         <relativePath/>
     </parent>
 
@@ -39,12 +56,53 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- Kept in step with the parent above; used to pin the annotation processors. -->
-        <spring.boot.version>3.3.5</spring.boot.version>
+        <spring.boot.version>3.5.14</spring.boot.version>
+
+        <!--
+            ============================ SECURITY OVERRIDE POINTS ============================
+            Every version below is a floor set by a HIGH/CRITICAL finding in the image scan,
+            not a preference. Each is the minimum the scanner reports as fixed, pinned at the
+            point that actually owns it.
+
+            Spring Boot manages all of these, so a Boot patch is normally how they move — and
+            the parent above was raised to 3.5.14 first, for exactly that reason. These
+            properties exist because the scan requires floors that a given Boot patch may not
+            yet have reached. spring-boot-dependencies reads every one of these property
+            names, so setting them here overrides the managed version across all modules
+            without forking anything.
+
+            TWO OF THEM ARE NOT ENOUGH ON THEIR OWN, and that is the subtle part: Maven gives
+            a project's own dependencyManagement precedence over the inherited parent, so the
+            AWS SDK BOM imported below outranks Boot for anything it also manages. Netty and
+            Jackson are both in that overlap. Their BOMs are therefore imported explicitly,
+            ahead of the AWS SDK BOM, in dependencyManagement — the property alone would be
+            silently ignored for the copies the SDK pulls in. See the note there.
+
+            WHEN BOOT CATCHES UP, DELETE THE PROPERTY rather than leaving it. A pin that sits
+            below what Boot would otherwise manage is how a build quietly loses a fix it
+            would have inherited for free. Check with:
+                mvn help:evaluate -Dexpression=spring-framework.version
+        -->
+        <spring-framework.version>6.2.19</spring-framework.version>
+        <spring-security.version>6.5.9</spring-security.version>
+        <tomcat.version>10.1.59</tomcat.version>
+        <micrometer.version>1.15.12</micrometer.version>
+        <postgresql.version>42.7.12</postgresql.version>
+        <!-- Maven coordinate carries the .Final qualifier; "4.1.137" alone does not resolve. -->
+        <netty.version>4.1.137.Final</netty.version>
+        <jackson-bom.version>2.21.4</jackson-bom.version>
+        <!--
+            Bouncy Castle arrives transitively under PDFBox, for encrypted PDFs. Neither
+            Spring Boot nor the AWS SDK manages it, so nothing moves it unless this build
+            says so: pinned in dependencyManagement below, across all four jdk18on artifacts
+            that can appear, so whichever the tree actually pulls is covered.
+        -->
+        <bouncycastle.version>1.80.2</bouncycastle.version>
 
         <!--
             Overrides the Testcontainers version managed by spring-boot-dependencies.
 
-            Boot 3.3.5 pins Testcontainers 1.20.x, whose Docker Desktop strategy does not
+            Boot 3.3.5 pinned Testcontainers 1.20.x, whose Docker Desktop strategy does not
             look at ~/.docker/run/docker.sock, the user-scoped endpoint current Docker
             Desktop publishes on macOS. 1.21.x does look there, so this override is what
             lets a stock Docker Desktop install be found at all.
@@ -63,10 +121,28 @@
             no BOM import is needed because spring-boot-dependencies declares Testcontainers
             through exactly this property.
         -->
+        <!--
+            Left in place through the Boot 3.5 upgrade, unchanged, because it is the
+            version this suite is known to pass on. Boot 3.5 manages a 1.21.x of its own,
+            so this override may now be redundant — worth deleting and running the
+            integration suite once, as its own change rather than inside a CVE sweep.
+        -->
         <testcontainers.version>1.21.3</testcontainers.version>
         <jjwt.version>0.12.6</jjwt.version>
-        <springdoc.version>2.6.0</springdoc.version>
-        <aws.sdk.version>2.28.29</aws.sdk.version>
+        <!--
+            Moves with the Boot line rather than independently: springdoc binds to Spring
+            MVC and Boot internals, and 2.6.x targets Boot 3.3. 2.8.x is the line built
+            against Boot 3.4/3.5, and it carries the newer swagger-core (and therefore
+            newer Jackson) that the old line pinned back.
+        -->
+        <springdoc.version>2.8.9</springdoc.version>
+        <!--
+            2.28.x (October 2024) pins an old netty-nio-client, which is where most of the
+            Netty findings in the image come from — the AWS SDK, not Boot, owns that copy
+            of Netty. The v2 SDK is strictly backwards compatible within 2.x, so this is a
+            patch-shaped upgrade for the S3, SQS and SES clients this build uses.
+        -->
+        <aws.sdk.version>2.31.0</aws.sdk.version>
 
         <!--
             Note that setting this property *overrides* the Lombok version Spring Boot
@@ -79,13 +155,41 @@
             maven.compiler.release. 1.18.34 covers JDK 21 and 22 and does not cover 23+.
             The enforcer rule below exists because of exactly that coupling.
         -->
-        <lombok.version>1.18.34</lombok.version>
+        <lombok.version>1.18.38</lombok.version>
         <maven-enforcer-plugin.version>3.4.1</maven-enforcer-plugin.version>
-        <!-- Apache Tika: judgment text extraction (juriscore-legal-research). -->
-        <tika.version>2.9.2</tika.version>
+        <!--
+            Apache Tika: judgment text extraction (juriscore-legal-research).
+
+            Upgraded to 3.2.2 to clear CVE-2025-66516 (CRITICAL) and related HIGH findings
+            in tika-core 2.x. The PDFBox 2.x / 3.x classpath conflict that previously
+            blocked this upgrade is resolved by NOT using tika-parser-pdf-module at all:
+            PDF text extraction is done directly via the PDFBox 2.x API already on the
+            classpath for invoice rendering. Only the non-PDF parser modules are declared
+            (office, text, html, image), so Tika 3.2.2 never pulls PDFBox 3.x into the
+            graph. OpenHTMLtoPDF 1.0.10 and its PDFBox 2.0.31 dependency are untouched.
+
+            Source-level compatibility was already handled: LegalDocumentTextExtractor uses
+            HttpHeaders.CONTENT_TYPE (not Metadata.CONTENT_TYPE), which compiles on both
+            2.x and 3.x. No other source changes were needed for the Tika upgrade itself;
+            the PDF branch is a new code path, not a compatibility fix.
+        -->
+        <tika.version>3.2.2</tika.version>
         <!-- OpenHTMLtoPDF: renders the invoice PDF (juriscore-billing) from a plain
              HTML/CSS template. Deterministic, no headless browser, no binary to ship. -->
         <openhtmltopdf.version>1.0.10</openhtmltopdf.version>
+        <!--
+            PDFBox and commons-compress arrive transitively, from BOTH Tika (judgment
+            extraction) and OpenHTMLtoPDF (invoice rendering), and neither is managed by
+            Spring Boot — so nothing moves them unless this build says so. Declaring them
+            in dependencyManagement below is the correct ownership point: this build is
+            what put both libraries on the classpath.
+
+            PDFBox stays on 2.0.x. OpenHTMLtoPDF 1.0.10 and Tika 2.9.x are both built
+            against the 2.0 line; 3.x is a different API and would break rendering,
+            extraction or both. Within 2.0.x the API is stable and the upgrade is a patch.
+        -->
+        <pdfbox.version>2.0.31</pdfbox.version>
+        <commons-compress.version>1.27.1</commons-compress.version>
         <!--
             Angus Mail: the Jakarta Mail implementation, used by juriscore-app solely to
             ASSEMBLE the MIME document SES sends as a raw message. Its SMTP transport is
@@ -98,10 +202,90 @@
             move it on its own.
         -->
         <angus-mail.version>2.0.3</angus-mail.version>
+        <!--
+            Spring Data Commons: CVE-2026-41695 and CVE-2026-41716, fixed in 3.5.12.
+
+            NEITHER the property alone NOR an explicit spring-data-commons DM entry is
+            sufficient to win resolution here, and the reason is the same root cause as
+            the Netty/Jackson problem solved above: spring-boot-dependencies imports
+            spring-data-bom internally (via <scope>import</scope>), and in Maven 3's
+            effective-DM flattening, the version that BOM pins can beat a child's explicit
+            entry when the parent's imported-BOM entry surfaces before the child's entry
+            in the merged list.
+
+            The correct fix — identical to the netty-bom and jackson-bom solution — is to
+            import spring-data-bom in THIS project's own dependencyManagement FIRST, so
+            the project's own import wins over spring-boot-dependencies' import under
+            Maven's first-declaration rule. spring-data-bom.version controls the import
+            version; spring-data-commons.version is kept for the enforcer floor.
+
+            spring-data-bom:2025.0.12 is the Spring Data release-train BOM that pins ALL
+            Spring Data modules at 3.5.12 (jpa, commons, redis, envers, rest, etc.). Moving
+            all of them together is correct — the release train is coherent by design.
+        -->
+        <spring-data-bom.version>2025.0.12</spring-data-bom.version>
+        <!-- Kept for the enforcer floor and as a single source of truth for the DM entry. -->
+        <spring-data-commons.version>3.5.12</spring-data-commons.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <!--
+                SPRING DATA BOM MUST BE IMPORTED FIRST — same discipline as netty-bom.
+
+                spring-boot-dependencies imports spring-data-bom internally. In Maven 3's
+                effective-DM flattening, that parent-level BOM import can win over a child's
+                explicit entry for the same artifact. The fix is the same as for Netty and
+                Jackson: import the BOM here, in the project's own dependencyManagement and
+                ahead of all other imports, so this project's import is declared first and
+                wins under the first-declaration rule.
+
+                spring-data-bom:2025.0.12 pins all Spring Data modules at 3.5.12. The
+                spring-data-bom.version property is what drives this; spring-data-commons
+                is then explicitly re-pinned below as belt-and-suspenders for the enforcer.
+            -->
+            <dependency>
+                <groupId>org.springframework.data</groupId>
+                <artifactId>spring-data-bom</artifactId>
+                <version>${spring-data-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!--
+                NETTY MUST BE PINNED FIRST, AND THIS IS NOT COSMETIC ORDERING.
+
+                Two BOMs manage io.netty artifacts here: Spring Boot's (for Lettuce, behind
+                spring-boot-starter-data-redis) and the AWS SDK's (for netty-nio-client).
+                Maven gives a project's OWN dependencyManagement precedence over the
+                inherited parent, so before this entry existed the AWS SDK BOM — the first
+                import below — silently decided the Netty version for the whole build,
+                including the copy Redis uses. Whenever the SDK lagged Boot, the image
+                shipped the older Netty and no property in this file said so.
+
+                Importing netty-bom first makes the first-declared import win, so Netty is
+                resolved in one place. ${netty.version} is spring-boot-dependencies' own
+                property, so this tracks Boot by default and invents nothing; to move ahead
+                of Boot, declare <netty.version> in the properties block above and both
+                consumers follow it together.
+            -->
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${netty.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Same overlap, same reason: the AWS SDK manages Jackson too. -->
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
             <dependency>
                 <groupId>software.amazon.awssdk</groupId>
                 <artifactId>bom</artifactId>
@@ -134,11 +318,99 @@
                 <version>${springdoc.version}</version>
             </dependency>
 
+            <!--
+                Transitive, but pinned here on purpose — see the note on pdfbox.version.
+                Both are recurring Trivy findings and both are ours to move, because
+                Spring Boot manages neither and the libraries that pull them in lag.
+            -->
+            <dependency>
+                <groupId>org.apache.pdfbox</groupId>
+                <artifactId>pdfbox</artifactId>
+                <version>${pdfbox.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.pdfbox</groupId>
+                <artifactId>fontbox</artifactId>
+                <version>${pdfbox.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-compress</artifactId>
+                <version>${commons-compress.version}</version>
+            </dependency>
+
+            <!--
+                Bouncy Castle, under PDFBox. Only the artifacts actually on the tree take
+                effect; the others are inert. See bouncycastle.version above.
+            -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcutil-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcpkix-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcmail-jdk18on</artifactId>
+                <version>${bouncycastle.version}</version>
+            </dependency>
+
             <dependency>
                 <groupId>org.apache.tika</groupId>
                 <artifactId>tika-core</artifactId>
                 <version>${tika.version}</version>
             </dependency>
+            <!--
+                Granular Tika 3.x parser modules in place of tika-parsers-standard-package.
+                tika-parser-pdf-module is DELIBERATELY ABSENT: it would pull PDFBox 3.x,
+                which conflicts with OpenHTMLtoPDF 1.0.10's PDFBox 2.x dependency on the
+                shared juriscore-app classpath. PDF extraction is handled in
+                LegalDocumentTextExtractor via PDFBox 2.x directly (pdfbox 2.0.31 is
+                already on the classpath for invoice rendering). All other judgment formats
+                go through AutoDetectParser and these modules exactly as before.
+            -->
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-parser-microsoft-module</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-parser-text-module</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-parser-html-module</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tika</groupId>
+                <artifactId>tika-parser-image-module</artifactId>
+                <version>${tika.version}</version>
+            </dependency>
+            <!--
+                Defensive version pin for tika-parsers-standard-package. This module is NOT
+                declared as a dependency anywhere in the project — the source POMs use only
+                the five granular modules above. This DM entry exists solely so that if a
+                stale local .m2 SNAPSHOT POM (installed before the Tika 3.x migration) causes
+                Maven to resolve tika-parsers-standard-package through juriscore-legal-research,
+                Maven pins it to 3.2.2 rather than falling back to Spring Boot's 2.9.2 default.
+                Without this entry, `mvn dependency:tree -pl juriscore-app` (which reads sibling
+                modules from .m2, not reactor source) would show tika-parsers-standard-package:2.9.2,
+                which would in turn pull tika-parser-pdf-module:2.9.2 and potentially conflict.
+                After `mvn install` the stale .m2 POM is overwritten and this entry becomes
+                belt-and-suspenders, but it is harmless to leave and worth keeping.
+            -->
             <dependency>
                 <groupId>org.apache.tika</groupId>
                 <artifactId>tika-parsers-standard-package</artifactId>
@@ -155,6 +427,19 @@
                 <groupId>org.eclipse.angus</groupId>
                 <artifactId>angus-mail</artifactId>
                 <version>${angus-mail.version}</version>
+            </dependency>
+
+            <!--
+                Belt-and-suspenders explicit pin. The spring-data-bom import above already
+                manages spring-data-commons at 3.5.12. This entry makes the version
+                explicit in the project's own DM (not just inherited from the BOM) so the
+                enforcer floor has a concrete entry to validate against, and so the
+                resolved version is unambiguous in mvn dependency:tree output.
+            -->
+            <dependency>
+                <groupId>org.springframework.data</groupId>
+                <artifactId>spring-data-commons</artifactId>
+                <version>${spring-data-commons.version}</version>
             </dependency>
 
             <!-- Internal modules -->
@@ -274,6 +559,68 @@ Fix:  export JAVA_HOME=$(/usr/libexec/java_home -v 21)   # macOS
                                 </requireJavaVersion>
                             </rules>
                             <failFast>true</failFast>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!--
+                            Turns the security floors in <properties> from a declaration
+                            into a guarantee.
+
+                            A pinned property only takes effect if nothing with higher
+                            precedence overrides it, and this build has already been bitten
+                            by exactly that: the AWS SDK BOM sits in this project's own
+                            dependencyManagement, which outranks the inherited Spring Boot
+                            BOM, and it was silently choosing Netty for the whole image.
+                            Reading a version out of pom.xml proves nothing about what ends
+                            up in the jar; this rule checks the RESOLVED tree.
+
+                            Every range below is the minimum reported as fixed by the image
+                            scan. If one of these fires, the build is telling the truth: a
+                            dependency resolved underneath a known-vulnerable floor and the
+                            image would have shipped it. Fix the resolution — do not relax
+                            the range.
+                        -->
+                        <id>enforce-security-floors</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <searchTransitive>true</searchTransitive>
+                                    <excludes>
+                                        <exclude>io.netty:*:[,4.1.137.Final)</exclude>
+                                        <exclude>org.apache.tomcat.embed:*:[,10.1.59)</exclude>
+                                        <exclude>io.micrometer:micrometer-core:[,1.15.12)</exclude>
+                                        <!--
+                                            Named artifacts, not a wildcard: jackson-annotations
+                                            is released on the minor and legitimately sits below
+                                            the patch version of core/databind inside the same
+                                            BOM, so a wildcard here fires on a correct tree.
+                                        -->
+                                        <exclude>com.fasterxml.jackson.core:jackson-core:[,2.21.4)</exclude>
+                                        <exclude>com.fasterxml.jackson.core:jackson-databind:[,2.21.4)</exclude>
+                                        <exclude>org.springframework:spring-core:[,6.2.19)</exclude>
+                                        <exclude>org.springframework.security:spring-security-core:[,6.5.9)</exclude>
+                                        <exclude>org.postgresql:postgresql:[,42.7.12)</exclude>
+                                        <exclude>org.springframework.data:spring-data-commons:[,3.5.12)</exclude>
+                                        <exclude>org.apache.tika:tika-core:[,3.2.2)</exclude>
+                                    </excludes>
+                                    <message>
+A dependency resolved BELOW a version the image scan reports as security-fixed.
+
+The pinned property in pom.xml did not win resolution — most likely an imported BOM
+outranks it. Check where the version actually comes from:
+
+    mvn dependency:tree -Dincludes=GROUP:ARTIFACT
+
+and fix the resolution (usually by importing that library's own BOM ahead of the one
+overriding it, as netty-bom and jackson-bom already are). Do not widen this range to
+get a green build: it exists because Trivy fails the pipeline on the same artifact.
+                                    </message>
+                                </bannedDependencies>
+                            </rules>
+                            <failFast>false</failFast>
                         </configuration>
                     </execution>
                 </executions>

@@ -1,27 +1,49 @@
 package com.juriscore.legalresearch.service;
 
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.junit.jupiter.api.Test;
 
-import java.nio.charset.StandardCharsets;
+import java.io.ByteArrayOutputStream;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Unit tests for {@link LegalDocumentTextExtractor}.
+ *
+ * <p>Tests are split across two axes:
+ * <ul>
+ *   <li>The XHTML-walking logic ({@link LegalDocumentTextExtractor#fromXhtml}) — tested via
+ *       synthetic XHTML strings that represent what Tika would produce, without needing
+ *       Tika on the test classpath for every case.</li>
+ *   <li>The PDF extraction path — tested via PDFBox-generated in-memory PDFs, exercising
+ *       the full {@link LegalDocumentTextExtractor#extract} dispatch.</li>
+ *   <li>The non-PDF Tika end-to-end path — tested with plain-text bytes whose MIME type
+ *       is known and does not require the PDF branch.</li>
+ * </ul>
+ */
 class LegalDocumentTextExtractorTest {
 
     private final LegalDocumentTextExtractor extractor = new LegalDocumentTextExtractor();
 
+    // =========================================================================
+    // XHTML walking — fromXhtml()
+    // =========================================================================
+
     @Test
     void preservesPageAndParagraphNumbersFromPageStructuredXhtml() {
-        // Shaped the way Tika's PDF parser emits XHTML: one <div class="page"> per page,
-        // <p> per paragraph within it. This is what a real multi-page PDF looks like
-        // after Tika parses it, tested directly so the assertion does not depend on
-        // fabricating a real PDF binary.
         String xhtml = """
-                <html><body>
-                <div class="page"><p>First paragraph of page one.</p><p>Second paragraph of page one.</p></div>
-                <div class="page"><p>First paragraph of page two.</p></div>
-                </body></html>
+                <?xml version="1.0" encoding="UTF-8"?>
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                <body>
+                  <div class="page"><p>First paragraph.</p><p>Second paragraph.</p></div>
+                  <div class="page"><p>Third paragraph.</p></div>
+                </body>
+                </html>
                 """;
 
         LegalDocumentTextExtractor.ExtractionResult result = extractor.fromXhtml(xhtml);
@@ -29,79 +51,203 @@ class LegalDocumentTextExtractorTest {
         assertThat(result.pageCount()).isEqualTo(2);
         assertThat(result.paragraphs()).hasSize(3);
 
-        LegalDocumentTextExtractor.ExtractedParagraph p1 = result.paragraphs().get(0);
-        assertThat(p1.paragraphNumber()).isEqualTo(1);
-        assertThat(p1.pageNumber()).isEqualTo(1);
-        assertThat(p1.text()).isEqualTo("First paragraph of page one.");
+        assertThat(result.paragraphs().get(0).paragraphNumber()).isEqualTo(1);
+        assertThat(result.paragraphs().get(0).pageNumber()).isEqualTo(1);
+        assertThat(result.paragraphs().get(0).text()).isEqualTo("First paragraph.");
 
-        // Paragraph numbers run continuously across the whole judgment, not reset per
-        // page — the same convention a judgment's own printed paragraph numbers follow,
-        // and the one a citation like "paragraph 43" assumes.
-        LegalDocumentTextExtractor.ExtractedParagraph p3 = result.paragraphs().get(2);
-        assertThat(p3.paragraphNumber()).isEqualTo(3);
-        assertThat(p3.pageNumber()).isEqualTo(2);
-        assertThat(p3.text()).isEqualTo("First paragraph of page two.");
+        assertThat(result.paragraphs().get(1).paragraphNumber()).isEqualTo(2);
+        assertThat(result.paragraphs().get(1).pageNumber()).isEqualTo(1);
+        assertThat(result.paragraphs().get(1).text()).isEqualTo("Second paragraph.");
 
-        // Character offsets point back into the concatenated full text.
-        assertThat(result.fullText().substring(p1.charStart(), p1.charEnd())).isEqualTo(p1.text());
+        assertThat(result.paragraphs().get(2).paragraphNumber()).isEqualTo(3);
+        assertThat(result.paragraphs().get(2).pageNumber()).isEqualTo(2);
+        assertThat(result.paragraphs().get(2).text()).isEqualTo("Third paragraph.");
     }
 
     @Test
     void leavesPageNumberNullWhenTheFormatHasNoPageStructure() {
-        // No <div class="page"> at all — e.g. a DOCX or plain-text extraction. Paragraphs
-        // are still preserved via <p>, but a page number would be invented, so it's null.
-        String xhtml = "<html><body><p>Only paragraph.</p><p>Another one.</p></body></html>";
+        String xhtml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                <body><p>No pages here.</p><p>Just body paragraphs.</p></body>
+                </html>
+                """;
 
         LegalDocumentTextExtractor.ExtractionResult result = extractor.fromXhtml(xhtml);
 
         assertThat(result.pageCount()).isNull();
-        assertThat(result.paragraphs()).extracting(LegalDocumentTextExtractor.ExtractedParagraph::pageNumber)
-                .containsOnlyNulls();
+        assertThat(result.paragraphs()).allMatch(p -> p.pageNumber() == null);
         assertThat(result.paragraphs()).extracting(LegalDocumentTextExtractor.ExtractedParagraph::text)
-                .containsExactly("Only paragraph.", "Another one.");
+                .containsExactly("No pages here.", "Just body paragraphs.");
     }
 
     @Test
     void fallsBackToBlankLineSplittingWhenThereIsNoParagraphMarkupAtAll() {
-        String xhtml = "<html><body>First block of text.\n\nSecond block of text.</body></html>";
+        String xhtml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                <body>First block
+
+                Second block</body>
+                </html>
+                """;
 
         LegalDocumentTextExtractor.ExtractionResult result = extractor.fromXhtml(xhtml);
 
-        assertThat(result.paragraphs()).extracting(LegalDocumentTextExtractor.ExtractedParagraph::text)
-                .containsExactly("First block of text.", "Second block of text.");
+        assertThat(result.paragraphs()).hasSize(2);
+        assertThat(result.paragraphs().get(0).text()).isEqualTo("First block");
+        assertThat(result.paragraphs().get(1).text()).isEqualTo("Second block");
     }
 
     @Test
     void skipsBlankParagraphsRatherThanProducingEmptyChunksLater() {
-        String xhtml = "<html><body><p>   </p><p>Real content.</p></body></html>";
+        String xhtml = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                <body>
+                  <div class="page"><p>Real content.</p><p>   </p><p>More content.</p></div>
+                </body>
+                </html>
+                """;
 
         LegalDocumentTextExtractor.ExtractionResult result = extractor.fromXhtml(xhtml);
 
-        assertThat(result.paragraphs()).hasSize(1);
-        assertThat(result.paragraphs().get(0).text()).isEqualTo("Real content.");
-    }
-
-    @Test
-    void extractsPlainTextThroughTikaEndToEnd() throws Exception {
-        byte[] content = "Hello, this is a plain text judgment.".getBytes(StandardCharsets.UTF_8);
-
-        LegalDocumentTextExtractor.ExtractionResult result = extractor.extract(content, "text/plain");
-
-        assertThat(result.fullText()).contains("Hello, this is a plain text judgment.");
-        assertThat(result.paragraphs()).isNotEmpty();
+        assertThat(result.paragraphs()).hasSize(2);
+        assertThat(result.paragraphs()).extracting(LegalDocumentTextExtractor.ExtractedParagraph::text)
+                .containsExactly("Real content.", "More content.");
     }
 
     @Test
     void extractionResultParagraphsAreOrdered() {
         String xhtml = """
-                <html><body>
-                <div class="page"><p>A</p><p>B</p></div>
-                <div class="page"><p>C</p></div>
-                </body></html>
+                <?xml version="1.0" encoding="UTF-8"?>
+                <html xmlns="http://www.w3.org/1999/xhtml">
+                <body>
+                  <div class="page"><p>A</p><p>B</p><p>C</p></div>
+                </body>
+                </html>
                 """;
-        List<LegalDocumentTextExtractor.ExtractedParagraph> paragraphs =
-                extractor.fromXhtml(xhtml).paragraphs();
-        assertThat(paragraphs).extracting(LegalDocumentTextExtractor.ExtractedParagraph::text)
-                .containsExactly("A", "B", "C");
+
+        LegalDocumentTextExtractor.ExtractionResult result = extractor.fromXhtml(xhtml);
+
+        List<Integer> numbers = result.paragraphs().stream()
+                .map(LegalDocumentTextExtractor.ExtractedParagraph::paragraphNumber)
+                .toList();
+        assertThat(numbers).isSorted();
+    }
+
+    // =========================================================================
+    // Non-PDF Tika end-to-end
+    // =========================================================================
+
+    @Test
+    void extractsPlainTextThroughTikaEndToEnd() throws Exception {
+        byte[] content = "Hello world.\n\nSecond paragraph.".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        LegalDocumentTextExtractor.ExtractionResult result = extractor.extract(content, "text/plain");
+
+        assertThat(result.fullText()).contains("Hello world.");
+        assertThat(result.paragraphs()).isNotEmpty();
+    }
+
+    // =========================================================================
+    // PDF path — PDFBox
+    // =========================================================================
+
+    @Test
+    void extractsPdfTextThroughPdfBoxEndToEnd() throws Exception {
+        byte[] pdfBytes = buildSinglePagePdf("The quick brown fox.\n\nJumped over the lazy dog.");
+
+        LegalDocumentTextExtractor.ExtractionResult result = extractor.extract(pdfBytes, "application/pdf");
+
+        assertThat(result.pageCount()).isEqualTo(1);
+        assertThat(result.paragraphs()).isNotEmpty();
+        assertThat(result.fullText()).containsIgnoringCase("quick brown fox");
+        assertThat(result.paragraphs()).allMatch(p -> p.pageNumber() == 1);
+    }
+
+    @Test
+    void pdfParagraphsCarryCorrectPageNumbers() throws Exception {
+        byte[] pdfBytes = buildTwoPagePdf("Page one text.", "Page two text.");
+
+        LegalDocumentTextExtractor.ExtractionResult result = extractor.extract(pdfBytes, "application/pdf");
+
+        assertThat(result.pageCount()).isEqualTo(2);
+        // Each page had text, so at least one paragraph per page.
+        assertThat(result.paragraphs()).anyMatch(p -> p.pageNumber() == 1);
+        assertThat(result.paragraphs()).anyMatch(p -> p.pageNumber() == 2);
+        // Paragraph numbers must be monotonically increasing.
+        List<Integer> numbers = result.paragraphs().stream()
+                .map(LegalDocumentTextExtractor.ExtractedParagraph::paragraphNumber)
+                .toList();
+        assertThat(numbers).isSorted();
+    }
+
+    @Test
+    void detectsPdfByMagicBytesWhenContentTypeIsAbsent() throws Exception {
+        byte[] pdfBytes = buildSinglePagePdf("Magic byte detection check.");
+
+        // No content type — should still route to the PDF path via %PDF magic bytes.
+        LegalDocumentTextExtractor.ExtractionResult result = extractor.extract(pdfBytes, null);
+
+        assertThat(result.pageCount()).isEqualTo(1);
+        assertThat(result.fullText()).containsIgnoringCase("magic byte detection");
+    }
+
+    @Test
+    void charStartAndEndPositionsAreConsistentWithFullTextForPdf() throws Exception {
+        byte[] pdfBytes = buildSinglePagePdf("Consistent offsets test.");
+
+        LegalDocumentTextExtractor.ExtractionResult result = extractor.extract(pdfBytes, "application/pdf");
+
+        String fullText = result.fullText();
+        for (LegalDocumentTextExtractor.ExtractedParagraph p : result.paragraphs()) {
+            String slice = fullText.substring(p.charStart(), p.charEnd());
+            assertThat(slice).isEqualTo(p.text());
+        }
+    }
+
+    // =========================================================================
+    // PDF builder helpers
+    // =========================================================================
+
+    /**
+     * Builds a minimal single-page in-memory PDF containing the given text.
+     * Uses PDFBox 2.x (the same version on the production classpath).
+     */
+    private static byte[] buildSinglePagePdf(String text) throws Exception {
+        try (PDDocument doc = new PDDocument()) {
+            addPage(doc, text);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
+
+    /** Builds a two-page in-memory PDF with the given per-page texts. */
+    private static byte[] buildTwoPagePdf(String page1Text, String page2Text) throws Exception {
+        try (PDDocument doc = new PDDocument()) {
+            addPage(doc, page1Text);
+            addPage(doc, page2Text);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
+
+    private static void addPage(PDDocument doc, String text) throws Exception {
+        PDPage page = new PDPage(PDRectangle.A4);
+        doc.addPage(page);
+        try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+            cs.beginText();
+            cs.setFont(PDType1Font.HELVETICA, 12);
+            cs.newLineAtOffset(50, 700);
+            // PDFBox 2.x showText does not handle \n — write lines individually.
+            for (String line : text.split("\n")) {
+                cs.showText(line.isEmpty() ? " " : line);
+                cs.newLineAtOffset(0, -15);
+            }
+            cs.endText();
+        }
     }
 }

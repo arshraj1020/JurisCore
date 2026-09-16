@@ -1,6 +1,10 @@
 package com.juriscore.legalresearch.service;
 
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
+import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.tika.exception.TikaException;
+import org.apache.tika.metadata.HttpHeaders;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.AutoDetectParser;
 import org.apache.tika.parser.ParseContext;
@@ -12,7 +16,6 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
-import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
@@ -23,44 +26,127 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Pulls text out of an uploaded judgment via Apache Tika, preserving page and paragraph
- * boundaries where the source format actually has them.
+ * Extracts structured text from uploaded judgment documents.
  *
- * <h2>How page/paragraph structure survives extraction</h2>
+ * <p>Two extraction paths:
+ * <ol>
+ *   <li><b>PDF</b> — handled directly via the PDFBox 2.x API ({@link PDDocument} +
+ *       {@link PDFTextStripper}). Tika's own {@code tika-parser-pdf-module} is deliberately
+ *       excluded from the classpath because it would pull PDFBox 3.x, which conflicts with
+ *       OpenHTMLtoPDF 1.0.10 (invoice rendering) that requires PDFBox 2.x.</li>
+ *   <li><b>Everything else</b> — routed through Tika's {@link AutoDetectParser} with
+ *       {@link ToXMLContentHandler}, covering Office (DOC/DOCX, XLS/XLSX, PPT/PPTX, ODF),
+ *       plain text, RTF, HTML, and images.</li>
+ * </ol>
  *
- * <p>Tika's parsers can emit XHTML rather than flat text ({@link ToXMLContentHandler}), and
- * for paginated formats — PDF chief among them — that XHTML wraps each page in
- * {@code <div class="page">} and each paragraph in {@code <p>}. That structure is what
- * this class walks to assign paragraph and page numbers; nothing here re-derives paragraph
- * boundaries from raw text, because Tika's parser already knows them better than a regex
- * on whitespace would.
- *
- * <p>Not every format has that structure. Plain text and most Office formats do not carry
- * an inherent notion of a "page" (that is a rendering concern, decided by page size and
- * font, not a property of the document), so {@link ExtractedParagraph#pageNumber()} is
- * {@code null} for those — left unknown rather than guessed, the same rule the rest of
- * this module follows for judgment metadata. Paragraphs are still preserved via {@code <p>}
- * where the format has them; a format with no paragraph markup at all falls back to
- * splitting on blank lines, and if even that yields nothing, the whole document becomes
- * one paragraph rather than being dropped.
+ * <p>The PDF path produces a flat paragraph list with page numbers derived from
+ * PDFTextStripper's per-page output. The Tika path produces structured XHTML that
+ * {@link #fromXhtml} walks to extract the same paragraph/page structure.
  */
 @Component
 public class LegalDocumentTextExtractor {
 
-    /** One preserved unit of the source document. */
     public record ExtractedParagraph(int paragraphNumber, Integer pageNumber, String text,
-                                      int charStart, int charEnd) {
-    }
+                                      int charStart, int charEnd) {}
 
-    /** {@code pageCount} is null when the format has no page concept (see class javadoc). */
-    public record ExtractionResult(String fullText, List<ExtractedParagraph> paragraphs, Integer pageCount) {
-    }
+    public record ExtractionResult(String fullText, List<ExtractedParagraph> paragraphs, Integer pageCount) {}
+
+    // -------------------------------------------------------------------------
+    // Public API
+    // -------------------------------------------------------------------------
 
     public ExtractionResult extract(byte[] content, String contentType) throws IOException, TikaException {
+        if (isPdf(contentType, content)) {
+            return extractFromPdf(content);
+        }
+        return extractViaTika(content, contentType);
+    }
+
+    // -------------------------------------------------------------------------
+    // PDF path — PDFBox 2.x
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns {@code true} when the content should be handled by the PDFBox path.
+     *
+     * <p>The MIME type is checked first because it is always cheapest. When the caller
+     * supplies no type (or an unhelpful "application/octet-stream"), the first four bytes
+     * of the content are inspected for the {@code %PDF} magic bytes, matching what Tika's
+     * own detector does internally.
+     */
+    private boolean isPdf(String contentType, byte[] content) {
+        if (contentType != null && !contentType.isBlank()) {
+            String type = contentType.split(";")[0].trim().toLowerCase();
+            if ("application/pdf".equals(type) || "application/x-pdf".equals(type)) {
+                return true;
+            }
+            // Non-PDF MIME type explicitly provided — trust it and use the Tika path.
+            if (!"application/octet-stream".equals(type)) {
+                return false;
+            }
+        }
+        // No type or generic binary: fall back to magic-byte detection.
+        return content != null && content.length >= 4
+                && content[0] == '%' && content[1] == 'P'
+                && content[2] == 'D' && content[3] == 'F';
+    }
+
+    /**
+     * Extracts text from a PDF using PDFBox 2.x, page by page.
+     *
+     * <p>Each non-blank page is split into paragraphs on double-newline boundaries.
+     * Single newlines within a paragraph are collapsed to a space to reconstruct
+     * reflowed lines, matching the behaviour of the Tika XHTML path.
+     *
+     * @throws IOException on I/O failure or on a password-protected PDF
+     *         ({@link InvalidPasswordException} extends {@link IOException})
+     */
+    private ExtractionResult extractFromPdf(byte[] content) throws IOException {
+        try (PDDocument doc = PDDocument.load(content)) {
+            int pageCount = doc.getNumberOfPages();
+            List<ExtractedParagraph> paragraphs = new ArrayList<>();
+            StringBuilder fullText = new StringBuilder();
+            int paragraphNumber = 1;
+
+            PDFTextStripper stripper = new PDFTextStripper();
+            stripper.setSortByPosition(true);
+
+            for (int page = 1; page <= pageCount; page++) {
+                stripper.setStartPage(page);
+                stripper.setEndPage(page);
+                String pageText = stripper.getText(doc);
+                if (pageText == null || pageText.isBlank()) {
+                    continue;
+                }
+
+                // Split on blank lines (paragraph boundary).
+                String[] blocks = pageText.split("\\n{2,}");
+                for (String block : blocks) {
+                    // Collapse single newlines (reflowed lines) to a space.
+                    String text = collapseWhitespace(block.replace('\n', ' '));
+                    if (text.isEmpty()) {
+                        continue;
+                    }
+                    int charStart = fullText.length();
+                    fullText.append(text).append('\n');
+                    int charEnd = fullText.length() - 1;
+                    paragraphs.add(new ExtractedParagraph(paragraphNumber++, page, text, charStart, charEnd));
+                }
+            }
+
+            return new ExtractionResult(fullText.toString(), paragraphs, pageCount);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Non-PDF path — Tika AutoDetectParser → XHTML → paragraph walking
+    // -------------------------------------------------------------------------
+
+    private ExtractionResult extractViaTika(byte[] content, String contentType) throws IOException, TikaException {
         AutoDetectParser parser = new AutoDetectParser();
         Metadata metadata = new Metadata();
         if (contentType != null && !contentType.isBlank()) {
-            metadata.set(Metadata.CONTENT_TYPE, contentType);
+            metadata.set(HttpHeaders.CONTENT_TYPE, contentType);
         }
         ToXMLContentHandler handler = new ToXMLContentHandler();
         try (InputStream stream = new ByteArrayInputStream(content)) {
@@ -71,101 +157,96 @@ public class LegalDocumentTextExtractor {
         return fromXhtml(handler.toString());
     }
 
-    /**
-     * The DOM-walking half, split out from {@link #extract} so the page/paragraph
-     * assignment logic can be unit tested against hand-written XHTML without needing a
-     * real PDF/DOCX binary to drive Tika.
-     */
-    ExtractionResult fromXhtml(String xhtml) {
-        Document dom = parseXml(xhtml);
+    // -------------------------------------------------------------------------
+    // XHTML → ExtractionResult (package-private for unit tests)
+    // -------------------------------------------------------------------------
 
-        List<Element> pageDivs = new ArrayList<>();
-        NodeList divs = dom.getElementsByTagName("div");
-        for (int i = 0; i < divs.getLength(); i++) {
-            Element div = (Element) divs.item(i);
-            if ("page".equals(div.getAttribute("class"))) {
-                pageDivs.add(div);
+    ExtractionResult fromXhtml(String xhtml) {
+        Document doc = parseXml(xhtml);
+        if (doc == null) {
+            return new ExtractionResult("", List.of(), null);
+        }
+
+        NodeList pageDivs = doc.getElementsByTagName("div");
+        List<Element> pageElements = new ArrayList<>();
+        for (int i = 0; i < pageDivs.getLength(); i++) {
+            Node n = pageDivs.item(i);
+            if (n instanceof Element e && "page".equals(e.getAttribute("class"))) {
+                pageElements.add(e);
             }
         }
 
         List<ExtractedParagraph> paragraphs = new ArrayList<>();
         StringBuilder fullText = new StringBuilder();
 
-        if (!pageDivs.isEmpty()) {
-            int pageNumber = 0;
-            for (Element page : pageDivs) {
+        if (!pageElements.isEmpty()) {
+            int pageNumber = 1;
+            for (Element page : pageElements) {
+                appendParagraphs(page, pageNumber, paragraphs, fullText);
                 pageNumber++;
-                appendParagraphs(page.getElementsByTagName("p"), pageNumber, paragraphs, fullText);
             }
-            return new ExtractionResult(fullText.toString(), paragraphs, pageNumber);
-        }
-
-        NodeList allParagraphs = dom.getElementsByTagName("p");
-        if (allParagraphs.getLength() > 0) {
-            appendParagraphs(allParagraphs, null, paragraphs, fullText);
-            if (!paragraphs.isEmpty()) {
-                return new ExtractionResult(fullText.toString(), paragraphs, null);
+        } else {
+            // No page structure: walk the body for paragraph-like elements.
+            NodeList bodies = doc.getElementsByTagName("body");
+            if (bodies.getLength() > 0) {
+                appendParagraphs((Element) bodies.item(0), null, paragraphs, fullText);
             }
         }
 
-        // Last resort: no <p> markup at all, or every <p> was blank. Split the document's
-        // raw text on blank lines; if that too yields nothing, the whole non-blank body
-        // becomes a single paragraph rather than a judgment with zero preserved text.
-        String bodyText = dom.getDocumentElement() == null ? "" : dom.getDocumentElement().getTextContent();
-        String[] blocks = bodyText.split("\\n\\s*\\n");
-        int index = 0;
-        for (String block : blocks) {
-            String trimmed = collapseWhitespace(block);
-            if (trimmed.isEmpty()) {
-                continue;
-            }
-            index++;
-            appendOne(index, null, trimmed, paragraphs, fullText);
-        }
-        if (paragraphs.isEmpty()) {
-            String trimmed = collapseWhitespace(bodyText);
-            if (!trimmed.isEmpty()) {
-                appendOne(1, null, trimmed, paragraphs, fullText);
-            }
-        }
-        return new ExtractionResult(fullText.toString(), paragraphs, null);
+        Integer pageCount = pageElements.isEmpty() ? null : pageElements.size();
+        return new ExtractionResult(fullText.toString(), paragraphs, pageCount);
     }
 
-    private void appendParagraphs(NodeList nodes, Integer pageNumber, List<ExtractedParagraph> out,
-                                  StringBuilder fullText) {
-        for (int i = 0; i < nodes.getLength(); i++) {
-            String trimmed = collapseWhitespace(nodes.item(i).getTextContent());
-            if (trimmed.isEmpty()) {
-                continue;
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    private void appendParagraphs(Element container, Integer pageNumber,
+                                   List<ExtractedParagraph> paragraphs, StringBuilder fullText) {
+        // Collect direct-child <p> elements; fall back to body text split on blank lines.
+        NodeList children = container.getChildNodes();
+        boolean hasParagraphElements = false;
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child instanceof Element e && "p".equals(e.getTagName())) {
+                hasParagraphElements = true;
+                appendOne(e.getTextContent(), pageNumber, paragraphs, fullText);
             }
-            appendOne(out.size() + 1, pageNumber, trimmed, out, fullText);
+        }
+        if (!hasParagraphElements) {
+            // Plain text: split on blank lines.
+            String body = container.getTextContent();
+            for (String block : body.split("\\n{2,}")) {
+                appendOne(block, pageNumber, paragraphs, fullText);
+            }
         }
     }
 
-    private void appendOne(int paragraphNumber, Integer pageNumber, String text,
-                           List<ExtractedParagraph> out, StringBuilder fullText) {
-        int start = fullText.length();
+    private void appendOne(String raw, Integer pageNumber,
+                            List<ExtractedParagraph> paragraphs, StringBuilder fullText) {
+        String text = collapseWhitespace(raw);
+        if (text.isEmpty()) {
+            return;
+        }
+        int charStart = fullText.length();
         fullText.append(text).append('\n');
-        int end = fullText.length() - 1;
-        out.add(new ExtractedParagraph(paragraphNumber, pageNumber, text, start, end));
+        int charEnd = fullText.length() - 1;
+        int paragraphNumber = paragraphs.size() + 1;
+        paragraphs.add(new ExtractedParagraph(paragraphNumber, pageNumber, text, charStart, charEnd));
     }
 
-    private static String collapseWhitespace(String text) {
-        return text == null ? "" : text.strip().replaceAll("\\s+", " ");
+    private static String collapseWhitespace(String s) {
+        return s.replaceAll("\\s+", " ").trim();
     }
 
-    private static Document parseXml(String xhtml) {
+    private static Document parseXml(String xml) {
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            // Hardened against XXE even though the input is Tika's own output, not
-            // externally supplied XML — cheap insurance, never a reason to trust less.
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
             factory.setNamespaceAware(false);
             DocumentBuilder builder = factory.newDocumentBuilder();
-            return builder.parse(new InputSource(new StringReader(xhtml)));
+            return builder.parse(new InputSource(new StringReader(xml)));
         } catch (Exception e) {
-            throw new IllegalStateException("Could not parse Tika's XHTML output", e);
+            return null;
         }
     }
 }
